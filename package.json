@@ -1,0 +1,30 @@
+{
+  "name": "sanguosha-online",
+  "version": "1.0.0",
+  "description": "三国杀网页版 - 支持局域网联机、开房间、人机对战，自动按人数配置身份",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node tools/simulate.js 10 8",
+    "test:all": "node tools/simulate-all.js",
+    "test:e2e": "node tools/e2e.js",
+    "test:fx": "node tools/test-fx.js",
+    "test:ui": "node tools/test-ui.js"
+  },
+  "keywords": [
+    "sanguosha",
+    "game",
+    "socket.io",
+    "lan"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1",
+    "socket.io-client": "^4.8.3"
+  }
+}

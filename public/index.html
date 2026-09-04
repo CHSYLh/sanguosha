@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1f1a">
+<title>三国杀 · 联机版</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ============ 大厅 ============ -->
+<section id="screen-home" class="screen active">
+  <div class="home-box">
+    <h1 class="title">三 国 杀</h1>
+    <p class="subtitle">局域网联机 · 开房间 · 人机对战 · 按人数自动配置身份</p>
+
+    <label class="field">
+      <span>你的昵称</span>
+      <input id="input-name" maxlength="12" placeholder="请输入昵称" autocomplete="off">
+    </label>
+
+    <button id="btn-create" class="btn btn-gold btn-lg">创建房间</button>
+
+    <div class="divider"><span>或</span></div>
+
+    <label class="field">
+      <span>房间号</span>
+      <input id="input-room" maxlength="4" placeholder="例如 A3K9" autocomplete="off" style="text-transform:uppercase">
+    </label>
+    <button id="btn-join" class="btn btn-lg">加入房间</button>
+
+    <div id="home-tip" class="tip"></div>
+
+    <div class="net-box">
+      <h3>其他人如何加入（局域网地址）</h3>
+      <div id="net-list" class="net-list"><span class="muted">正在获取网络地址…</span></div>
+      <p class="muted net-note">同一 Wi‑Fi 下的手机 / 平板 / 电脑，在浏览器打开上面的地址并输入房间号即可加入。
+        若无法连接，请检查本机防火墙是否放行该端口。</p>
+    </div>
+
+    <div class="help">
+      <h3>联机说明</h3>
+      <ul>
+        <li>房主点击<b>创建房间</b>后，把上面的地址和房间号发给朋友即可。</li>
+        <li>手机、平板、电脑均可游玩，界面会自动适配屏幕。</li>
+        <li>人数不足时可随时添加「人机」作为队友或对手，房主点击开始即可。</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 房间 ============ -->
+<section id="screen-room" class="screen">
+  <header class="bar">
+    <button id="btn-room-leave" class="btn btn-sm btn-ghost">退出房间</button>
+    <div class="room-title">房间 <b id="room-id">----</b>
+      <button id="btn-copy" class="btn btn-xs btn-ghost">复制邀请</button>
+    </div>
+  </header>
+
+  <div class="room-body">
+    <div class="panel">
+      <div class="panel-head">
+        <h3>座位表 <small id="room-count">0 人</small></h3>
+        <div id="host-ai-ctrl" class="ai-ctrl">
+          <span class="muted">人机数量</span>
+          <button id="btn-ai-minus" class="btn btn-xs">－</button>
+          <b id="ai-count">0</b>
+          <button id="btn-ai-plus" class="btn btn-xs">＋</button>
+        </div>
+      </div>
+      <div id="seat-list" class="seat-list"></div>
+      <div id="role-preview" class="role-preview"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head"><h3>玩法说明</h3></div>
+      <div class="rules">
+        <p><b>目标：</b>主公与忠臣消灭所有反贼和内奸；反贼杀死主公；内奸先清除其他人再单挑主公。</p>
+        <p><b>流程：</b>回合开始（判定区结算）→ 摸牌 → 出牌 → 弃牌（手牌数不超过体力值）→ 回合结束。</p>
+        <p><b>操作：</b>点击手牌后选择用法，再点击目标角色即可出牌；需要响应时（出闪、出杀、出桃等）底部会弹出按钮。</p>
+        <p><b>身份：</b>主公身份公开且体力上限+1，其余身份暗置，阵亡后亮明。身份数量随房间人数自动分配。</p>
+      </div>
+    </div>
+  </div>
+
+  <footer class="bar bar-bottom">
+    <div id="room-hint" class="muted">等待房主开始…</div>
+    <button id="btn-start" class="btn btn-gold btn-lg">开始游戏</button>
+  </footer>
+</section>
+
+<!-- ============ 选将 ============ -->
+<div id="modal-hero" class="modal">
+  <div class="modal-box">
+    <h3>选择你的武将 <span id="pick-timer" class="muted"></span></h3>
+    <div id="hero-options" class="hero-options"></div>
+  </div>
+</div>
+
+<!-- ============ 游戏 ============ -->
+<section id="screen-game" class="screen">
+  <header id="game-top" class="game-top">
+    <div class="gt-left">
+      <span class="pill" id="g-round">第 1 轮</span>
+      <span class="pill" id="g-phase">准备</span>
+    </div>
+    <div class="gt-mid" id="g-role">身份</div>
+    <div class="gt-right">
+      <button id="btn-sound" class="btn btn-xs btn-ghost" title="开关音效">🔊 音效</button>
+      <button id="btn-toggle-log" class="btn btn-xs btn-ghost">日志</button>
+      <button id="btn-quit-game" class="btn btn-xs btn-ghost">退出</button>
+    </div>
+  </header>
+
+  <!-- 牌桌：所有玩家环绕四周，中央为牌堆 / 弃牌区 / 打出的牌 -->
+  <div class="table" id="table">
+    <div class="table-felt"></div>
+
+    <div class="table-center">
+      <div class="tc-pile" id="tc-draw" title="牌堆">
+        <div class="tc-stack"></div>
+        <div class="tc-label">牌堆</div>
+        <div class="tc-count" id="tc-draw-count">0</div>
+      </div>
+      <div class="tc-stage" id="tc-stage"></div>
+      <div class="tc-pile" id="tc-discard" title="弃牌区">
+        <div class="tc-stack discard"></div>
+        <div class="tc-label">弃牌区</div>
+        <div class="tc-count" id="tc-discard-count">0</div>
+      </div>
+    </div>
+
+    <div class="seat-ring" id="seat-ring"></div>
+    <div class="fx-layer" id="fx-layer"></div>
+  </div>
+
+  <div class="self-area" id="self-area"></div>
+  <div class="prompt" id="prompt"></div>
+
+  <aside id="log-panel" class="log-panel">
+    <div class="log-head">
+      <span>战斗日志</span>
+      <button id="btn-close-log" class="btn btn-xs btn-ghost">关闭</button>
+    </div>
+    <div id="log-list" class="log-list"></div>
+  </aside>
+</section>
+
+<!-- ============ 卡牌 / 武将 详情 ============ -->
+<div id="modal-info" class="modal">
+  <div class="modal-box info-box">
+    <div class="info-head">
+      <div id="info-card-preview" class="info-preview"></div>
+      <div class="info-title">
+        <h3 id="info-title">详情</h3>
+        <div id="info-sub" class="muted"></div>
+      </div>
+      <button id="btn-info-close" class="btn btn-xs btn-ghost">关闭</button>
+    </div>
+    <div id="info-body" class="info-body"></div>
+  </div>
+</div>
+
+<!-- ============ 结算 ============ -->
+<div id="modal-result" class="modal">
+  <div class="modal-box">
+    <h2 id="result-title">游戏结束</h2>
+    <div id="result-body" class="result-body"></div>
+    <div class="modal-actions">
+      <button id="btn-rematch" class="btn btn-gold">再来一局</button>
+      <button id="btn-back-room" class="btn">返回房间</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="sound.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
