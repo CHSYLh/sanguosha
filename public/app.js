@@ -234,14 +234,14 @@
     </div>`;
   }
 
-  /** 装备小标签，可点击查看效果 */
+  /** 装备小标签，可点击查看效果；按槽位着色并加边框以便区分 */
   function equipMinis(eq, clickable) {
     const out = [];
     const map = { weapon: '武', armor: '防', horsePlus: '+1', horseMinus: '-1' };
     for (const k of ['weapon', 'armor', 'horsePlus', 'horseMinus']) {
       if (eq && eq[k]) {
         const c = eq[k];
-        out.push(`<span class="mini" ${clickable ? `data-info-card="${c.uid}" data-info-card-obj="1" title="${esc(c.desc)}"` : `title="${esc(c.cn)}：${esc(c.desc)}"`}>${map[k]}·${esc(c.cn)}</span>`);
+        out.push(`<span class="mini eq-${k}" ${clickable ? `data-info-card="${c.uid}" data-info-card-obj="1" title="${esc(c.cn)}：${esc(c.desc)}"` : `title="${esc(c.cn)}：${esc(c.desc)}"`}>${map[k]}·${esc(c.cn)}</span>`);
       }
     }
     return out.join('');
@@ -261,6 +261,8 @@
 
   function seatHtml(pl, g) {
     const cls = ['seat'];
+    const anim = seatAnimClass(pl.seat);
+    if (anim) cls.push(anim);
     if (pl.seat === g.me.seat) cls.push('is-me');
     if (pl.dead) cls.push('dead');
     if (g.currentSeat === pl.seat && !g.over) cls.push('current');
@@ -320,6 +322,8 @@
     const ring = $('#seat-ring');
     ring.innerHTML = '';
     ring.appendChild(frag);
+    // 重建后把仍在有效期内的受击/回血/阵亡动画补回去
+    for (const seat of Array.from(seatAnims.keys())) applySeatAnim(seat);
   }
 
   /* ================= 卡牌 / 武将 详情 ================= */
@@ -405,15 +409,82 @@
     if (card) { showCardInfo(card.dataset.infoCard); return; }
   });
 
+  /* ================= 等待提示 + 倒计时（向所有人公布当前在等什么、还剩多久） ================= */
+  function leftSeconds(w) {
+    return w && w.timeoutAt ? Math.max(0, Math.ceil((w.timeoutAt - Date.now()) / 1000)) : 0;
+  }
+
+  function tickWaiting() {
+    const g = state.game;
+    if (!g) return;
+    const box = $('#tc-wait');
+    const timer = $('#g-countdown');
+    const turnTimer = $('#turn-countdown');
+    const w = g.pendingPublic;
+
+    if (!w) {
+      if (box) { box.innerHTML = ''; box.className = 'tc-wait'; }
+      if (timer) { timer.textContent = '⏱ --s'; timer.className = 'pill pill-timer'; }
+      if (turnTimer) turnTimer.textContent = '';
+      return;
+    }
+
+    const left = leftSeconds(w);
+    const urgent = left <= 5;
+
+    // 顶部倒计时：任何时候都可见（包括自己的出牌阶段）
+    if (timer) {
+      timer.textContent = `⏱ ${left}s`;
+      timer.className = 'pill pill-timer' + (urgent ? ' urgent' : '');
+    }
+    // 出牌阶段：倒计时直接显示在操作栏上，提醒当前玩家
+    if (turnTimer) {
+      turnTimer.textContent = `${left}s`;
+      turnTimer.className = 'turn-timer' + (urgent ? ' urgent' : '');
+    }
+
+    if (!box) return;
+    // 响应类请求是匿名的：只说在问什么，不说在问谁
+    const who = w.seat === null || w.seat === undefined
+      ? '有角色'
+      : (g.players[w.seat] ? g.players[w.seat].name : '');
+    const key = w.as === 'peach' ? ' key peach' : w.as === 'wuxie' ? ' key wuxie' : '';
+    box.className = 'tc-wait show' + (urgent ? ' urgent' : '') + key;
+    box.innerHTML = `<span class="tw-who">${esc(who)}</span>
+      <span class="tw-title">${esc(w.title)}</span>
+      <span class="tw-time">${left}s</span>`;
+  }
+  setInterval(tickWaiting, 250);
+
   /* ================= 出牌动画与音效 ================= */
-  /** 在座位元素上播放一次受击/回血/阵亡效果 */
-  function flashSeat(seat, cls) {
+  // 座位动画需要跨重渲染保留：牌桌会因每个 game 事件重建座位环，
+  // 若不记录状态，刚加上的受击/回血动画会被立刻抹掉（表现为“扣血没动画”）。
+  const seatAnims = new Map(); // seat -> {cls, until}
+
+  function seatAnimClass(seat) {
+    const a = seatAnims.get(seat);
+    if (!a) return '';
+    if (Date.now() > a.until) { seatAnims.delete(seat); return ''; }
+    return a.cls;
+  }
+
+  function applySeatAnim(seat) {
     const el = $(`#seat-ring .seat[data-seat="${seat}"]`);
     if (!el) return;
-    el.classList.remove('hit', 'heal', 'dying');
-    void el.offsetWidth; // 强制重排以便重新触发动画
-    el.classList.add(cls);
-    setTimeout(() => el.classList.remove(cls), 900);
+    el.classList.remove('hit', 'heal', 'hurt', 'dying');
+    const cls = seatAnimClass(seat);
+    if (cls) { void el.offsetWidth; el.classList.add(cls); }
+  }
+
+  /** 在座位元素上播放一次受击/回血/阵亡效果 */
+  function flashSeat(seat, cls, dur) {
+    const ms = dur || 900;
+    seatAnims.set(seat, { cls, until: Date.now() + ms });
+    applySeatAnim(seat);
+    setTimeout(() => {
+      const a = seatAnims.get(seat);
+      if (a && Date.now() > a.until) { seatAnims.delete(seat); applySeatAnim(seat); }
+    }, ms + 50);
   }
 
   function floatText(seat, text, cls) {
@@ -431,20 +502,39 @@
     setTimeout(() => node.remove(), 1100);
   }
 
-  /** 中央舞台展示刚打出的牌 */
-  function showPlayedCard(fx) {
+  function whoName(seat) {
+    if (!state.game || !state.game.players[seat]) return '';
+    return state.game.players[seat].name;
+  }
+
+  /** 全场横幅提示（无懈可击询问、濒死救援等需要所有人知晓的信息） */
+  let bannerTimer = null;
+  function showBanner(text, kind, ms) {
+    const box = $('#fx-banner');
+    if (!box) return;
+    box.textContent = text;
+    box.className = 'fx-banner show' + (kind ? ' ' + kind : '');
+    clearTimeout(bannerTimer);
+    bannerTimer = setTimeout(() => { box.className = 'fx-banner'; }, ms || 2200);
+  }
+
+  /** 中央舞台展示刚打出/公示的牌；hold 为停留毫秒（判定牌需要停留更久） */
+  function showPlayedCard(fx, opts) {
     const stage = $('#tc-stage');
     if (!stage || !fx.card) return;
     const layer = $('#fx-layer');
+    const hold = (opts && opts.hold) || 1600;
+    const tag = (opts && opts.tag) || '';
     const who = state.game ? (state.game.players[fx.seat] || {}).name : '';
     const node = document.createElement('div');
-    node.className = 'fx-card';
+    node.className = 'fx-card' + (tag ? ' ' + tag : '');
+    node.style.setProperty('--fx-hold', hold + 'ms');
     const targetNames = (fx.targets || []).map((s) => (state.game && state.game.players[s] ? state.game.players[s].name : '')).filter(Boolean);
     node.innerHTML = `
       <div class="card ${fx.card.color === 'red' ? 'red' : 'black'} ${typeCls(fx.card)}" style="cursor:default">
         ${cardInner(fx.card)}
       </div>
-      <div class="fx-who">${esc(who || '')}${targetNames.length ? ' → ' + esc(targetNames.join('、')) : ''}</div>`;
+      <div class="fx-who">${esc((opts && opts.who) || who || '')}${targetNames.length ? ' → ' + esc(targetNames.join('、')) : ''}</div>`;
     if (layer) {
       const lr = layer.getBoundingClientRect();
       node.style.left = lr.width / 2 + 'px';
@@ -453,7 +543,7 @@
     } else {
       stage.appendChild(node);
     }
-    setTimeout(() => node.remove(), 1600);
+    setTimeout(() => node.remove(), hold + 120);
   }
 
   /** 处理服务端推送的动画/音效事件 */
@@ -480,7 +570,9 @@
         floatText(fx.seat, '阵亡', 'dmg');
         break;
       case 'judge':
-        showPlayedCard({ card: fx.card, seat: fx.seat, targets: [] });
+        // 判定牌停留约 3 秒，方便所有人看清结果与来源
+        showPlayedCard({ card: fx.card, seat: fx.seat, targets: [] },
+          { hold: 3000, tag: 'fx-judge', who: `${whoName(fx.seat)} · ${fx.reason || '判定'}` });
         break;
       case 'skill':
         floatText(fx.seat, fx.cn || '技能', 'heal');
@@ -489,8 +581,18 @@
         showPlayedCard({ seat: fx.seat, card: fx.card, targets: [] });
         break;
       case 'dying':
+        flashSeat(fx.seat, 'dying', 1500);
         if (fx.seat === mySeat) toast('你已进入濒死状态，等待他人救援');
         else floatText(fx.seat, '濒死', 'dmg');
+        break;
+      case 'askWuxie':
+        // 全场提示：正在询问是否有人使用无懈可击
+        showBanner(`询问是否使用【无懈可击】抵消【${cardCn(fx.cardName)}】`, 'wuxie', 2600);
+        break;
+      case 'destroy':
+        // 过河拆桥弃置的牌向全场公示
+        showPlayedCard({ card: fx.card, seat: fx.bySeat, targets: [fx.seat] },
+          { hold: 2600, tag: 'fx-destroy', who: `${whoName(fx.bySeat)} 弃置 ${whoName(fx.seat)} 的` });
         break;
       case 'turn':
         if (fx.seat === mySeat) toast('轮到你的回合');
@@ -516,6 +618,8 @@
     // 中央：牌堆 / 出牌舞台 / 弃牌区
     $('#tc-draw-count').textContent = g.drawPileCount;
     $('#tc-discard-count').textContent = g.discardCount;
+    $('#g-roomid').textContent = `房间 ${g.roomId || '----'}`;
+    tickWaiting();
 
     // 日志
     const list = $('#log-list');
@@ -696,6 +800,8 @@
       body = `<button class="btn btn-gold" data-act="play" ${ok ? '' : 'disabled'}>确定出牌</button>`;
       body += `<button class="btn btn-sm" data-act="cancel">取消</button>`;
     }
+    const left = leftSeconds(g.pendingPublic);
+    body = `<span class="turn-timer" id="turn-countdown">${left}s</span>` + body;
     body += `<div class="p-act"><button class="btn btn-sm" data-act="endturn">结束回合</button></div>`;
     box.innerHTML = `<div class="p-title">${title}</div><div class="p-body">${body}</div>`;
   }

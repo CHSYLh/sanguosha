@@ -361,6 +361,8 @@ class Game {
       },
     };
     const timeout = req.kind === 'turn' ? this.turnTimeout : this.reqTimeout;
+    this.pending.timeout = timeout;
+    this.pending.timeoutAt = Date.now() + timeout * 1000;
     timer = setTimeout(() => {
       if (this.pending && this.pending.id === id) this.pending.resolve(null);
     }, timeout * 1000);
@@ -389,6 +391,32 @@ class Game {
     if (!this.pending || this.pending.seat !== seat) return false;
     this.pending.resolve(ans);
     return true;
+  }
+
+  /**
+   * 待操作提示的公开文案：会广播给房间内所有人。
+   * 只包含公开信息——不透露可选手牌，也不透露“正在询问谁”（响应类请求）。
+   */
+  publicPendingTitle(req) {
+    const r = req || {};
+    const ctx = r.ctx || {};
+    const name = (s) => (this.players[s] ? this.players[s].name : '');
+    const cnOf = (n) => (CARD_META[n] ? CARD_META[n].cn : '锦囊');
+
+    if (r.kind === 'turn') return '出牌阶段';
+    if (r.kind === 'guanxing') return '观星';
+    // 响应类请求：只说“在问什么”，不说“在问谁”
+    if (r.kind === 'respond') {
+      if (r.as === 'wuxie') return `询问是否有人使用【无懈可击】抵消【${cnOf(ctx.cardName)}】`;
+      if (r.as === 'peach') return `询问是否有人使用【桃】救援 ${name(ctx.target)}`;
+      return `询问是否有人打出【${cnOf(r.as)}】`;
+    }
+    if (r.kind === 'choose') {
+      if (r.style === 'players') return r.prompt || '选择一名角色';
+      if (r.style === 'suits') return '猜测花色';
+      return r.prompt || '做出选择';
+    }
+    return '等待操作';
   }
 
   async choose(seat, { prompt, choices, min = 1, max = 1, optional = false, style = 'options', purpose = '', extra = {} }) {
@@ -503,8 +531,12 @@ class Game {
   async askWuxie(cardName, sourceSeat, targetSeat) {
     const start = this.players[sourceSeat] || this.players[targetSeat];
     if (!start) return false;
+    // 开场提示：向全场广播“正在询问是否有人使用无懈可击”
+    this.emitFX({ type: 'askWuxie', cardName, bySeat: sourceSeat, targetSeat });
     for (const p of this.orderFrom(start)) {
       if (this.over || p.dead) continue;
+      // 锦囊的使用者不需要对自己的牌使用【无懈可击】
+      if (p.seat === sourceSeat) continue;
       const choices = this.cardOptions(p, 'wuxie', {});
       if (!choices.length) continue;
       const id = await this.respond(p.seat, 'wuxie', {
@@ -590,7 +622,7 @@ class Game {
 
   async resolveDying(target, source) {
     this.log(`${target.name} 进入濒死状态，开始求桃`);
-    this.emitFX({ type: 'dying', seat: target.seat, hp: target.hp });
+    this.emitFX({ type: 'dying', seat: target.seat, hp: target.hp, name: target.name });
     let guard = 0;
     while (target.hp <= 0 && !target.dead && !this.over && guard++ < 20) {
       let saved = false;
@@ -1226,6 +1258,11 @@ class Game {
     } else {
       this.discardCard(card);
       this.log(`${target.name} 的【${CARD_META[card.name].cn}】被弃置`);
+      // 过河拆桥弃置的牌向全场公示
+      this.emitFX({
+        type: 'destroy', seat: target.seat, bySeat: p.seat,
+        card: cardView(card), from: id.startsWith('eq:') ? 'equip' : id.startsWith('jd:') ? 'judge' : 'hand',
+      });
     }
   }
 
@@ -1346,6 +1383,21 @@ class Game {
       pending,
       waitingSeat: this.pending ? this.pending.seat : null,
       waitingName: this.pending ? this.players[this.pending.seat].name : null,
+      // 公开给所有人的“当前在等什么、还剩多久”，含倒计时截止时间戳。
+      // 响应类请求（杀/闪/桃/无懈可击）不公开“正在询问谁”，只公开询问内容。
+      pendingPublic: this.pending ? (() => {
+        const anonymous = this.pending.req.kind === 'respond';
+        return {
+          seat: anonymous ? null : this.pending.seat,
+          anonymous,
+          kind: this.pending.req.kind,
+          as: this.pending.req.as || null,
+          style: this.pending.req.style || '',
+          title: this.publicPendingTitle(this.pending.req),
+          timeoutAt: this.pending.timeoutAt || 0,
+          timeout: this.pending.timeout || 0,
+        };
+      })() : null,
       logs: this.logs.slice(-120),
     };
   }

@@ -404,6 +404,154 @@ function fakeRoomPicking(clientId) {
   await new Promise((r) => setTimeout(r, 20));
   check($('#info-title').textContent === '青釭剑', '可继续查看该装备的效果');
 
+  /* ---------- [8] 新增需求 ---------- */
+  console.log('\n[8] 新增需求');
+
+  // 8.1 扣血动画：跨重渲染仍保留（此前会被牌桌重建抹掉）
+  SGS.setGame(fakeGame(6));
+  await new Promise((r) => setTimeout(r, 20));
+  SGS.handleFX({ type: 'damage', seat: 3, amount: 2, source: 0 });
+  await new Promise((r) => setTimeout(r, 30));
+  check(!!$('#seat-ring .seat[data-seat="3"].hit'), '扣血时座位出现受击动画');
+  SGS.renderGame(); // 模拟收到新的 game 状态导致牌桌重建
+  await new Promise((r) => setTimeout(r, 20));
+  check(!!$('#seat-ring .seat[data-seat="3"].hit'), '牌桌重建后受击动画仍然保留（修复扣血无动画）');
+  check(!!doc.querySelector('.fx-float.dmg'), '扣血同时飘出伤害数字');
+
+  // 8.2 无懈可击询问向所有人广播
+  layer.innerHTML = '';
+  SGS.handleFX({ type: 'askWuxie', cardName: 'dismantle', bySeat: 1, targetSeat: 2 });
+  await new Promise((r) => setTimeout(r, 30));
+  const banner = $('#fx-banner');
+  check(banner.classList.contains('show'), '询问无懈可击时弹出全场横幅');
+  check(banner.textContent.indexOf('无懈可击') >= 0 && banner.textContent.indexOf('过河拆桥') >= 0,
+    `横幅说明具体内容（${banner.textContent}）`);
+
+  // 8.3 过河拆桥公示被弃置的牌
+  layer.innerHTML = '';
+  SGS.handleFX({
+    type: 'destroy', seat: 2, bySeat: 1, from: 'equip',
+    card: { uid: 'z1', cn: '青釭剑', type: 'equip', suit: 'spade', num: 6, color: 'black', sub: 'weapon' },
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  const destroyFx = layer.querySelector('.fx-card.fx-destroy');
+  check(!!destroyFx, '过河拆桥弃置的牌在中央公示');
+  check(destroyFx && destroyFx.textContent.indexOf('青釭剑') >= 0, '公示内容包含被弃置的牌名');
+  check(destroyFx && destroyFx.textContent.indexOf('弃置') >= 0, '公示说明这是被弃置的牌');
+
+  // 8.4 装备栏边框区分
+  const weaponMini = $('#seat-ring .seat[data-seat="2"] .mini.eq-weapon');
+  check(!!weaponMini, '装备标签带有槽位类（eq-weapon），可区分样式');
+  const css3 = fs.readFileSync(path.join(PUBLIC, 'style.css'), 'utf8');
+  for (const slot of ['weapon', 'armor', 'horsePlus', 'horseMinus']) {
+    check(new RegExp(`\\.mini\\.eq-${slot}\\s*\\{`).test(css3), `装备槽位 ${slot} 有独立边框样式`);
+  }
+  check(/\.me-equips \.mini\.eq-weapon\s*\{/.test(css3), '自己的装备栏也有独立的边框样式');
+
+  // 8.5 濒死广播（服务端 pendingPublic + 客户端醒目样式）
+  const g5 = fakeGame(6);
+  g5.pendingPublic = {
+    seat: 2, kind: 'respond', as: 'peach', style: 'cards',
+    title: '是否使用【桃】救援 玩家3', timeoutAt: Date.now() + 12000, timeout: 25,
+  };
+  SGS.setGame(g5);
+  await new Promise((r) => setTimeout(r, 60));
+  const wait = $('#tc-wait');
+  check(wait.classList.contains('show'), '濒死求桃时中央显示等待提示');
+  check(wait.classList.contains('peach'), '求桃提示使用醒目样式（peach）');
+  check(wait.textContent.indexOf('玩家3') >= 0 && wait.textContent.indexOf('桃') >= 0,
+    `提示说明是谁在向谁求桃（${wait.textContent.trim()}）`);
+
+  // 8.6 进入游戏后仍显示房间号
+  check($('#g-roomid').textContent.indexOf('TEST') >= 0,
+    `游戏界面显示房间号（${$('#g-roomid').textContent}）`);
+
+  // 8.7 判定动画约 3 秒
+  layer.innerHTML = '';
+  SGS.handleFX({ type: 'judge', seat: 1, card: { uid: 'j2', cn: '乐不思蜀', type: 'delayed', suit: 'heart', num: 6, color: 'red' }, reason: '乐不思蜀' });
+  await new Promise((r) => setTimeout(r, 30));
+  const judgeFx = layer.querySelector('.fx-card.fx-judge');
+  check(!!judgeFx, '判定牌带有 fx-judge 标记');
+  check(judgeFx && judgeFx.style.getPropertyValue('--fx-hold') === '3000ms',
+    `判定动画时长为 3 秒（${judgeFx && judgeFx.style.getPropertyValue('--fx-hold')}）`);
+  check(judgeFx && judgeFx.textContent.indexOf('乐不思蜀') >= 0, '判定展示判定牌与判定原因');
+
+  // 8.8 回合阶段倒计时向所有人公布
+  const g8 = fakeGame(6);
+  g8.pendingPublic = { seat: 0, kind: 'turn', as: null, style: '', title: '出牌阶段', timeoutAt: Date.now() + 30000, timeout: 90 };
+  SGS.setGame(g8);
+  await new Promise((r) => setTimeout(r, 60));
+  const wait8 = $('#tc-wait');
+  check(wait8.classList.contains('show'), '回合等待时显示提示');
+  check(wait8.textContent.indexOf('玩家1') >= 0, `显示当前行动者（${wait8.textContent.trim()}）`);
+  check(wait8.textContent.indexOf('出牌阶段') >= 0, '显示当前阶段');
+  const secs = wait8.querySelector('.tw-time');
+  check(!!secs && /^\d+s$/.test(secs.textContent.trim()), `显示倒计时秒数（${secs && secs.textContent}）`);
+  // 倒计时临近时应变为紧急样式
+  g8.pendingPublic.timeoutAt = Date.now() + 3000;
+  SGS.setGame(g8);
+  await new Promise((r) => setTimeout(r, 300));
+  check($('#tc-wait').classList.contains('urgent'), '倒计时不足时变为紧急样式');
+
+  /* ---------- [9] 倒计时上屏 & 匿名询问 ---------- */
+  console.log('\n[9] 倒计时与匿名询问');
+
+  // 9.1 出牌阶段倒计时：顶部 + 操作栏都要显示
+  const g9 = fakeGame(6);
+  g9.pending = { id: 9, kind: 'turn', actions: [], canEnd: true };
+  g9.pendingPublic = { seat: 0, anonymous: false, kind: 'turn', as: null, style: '', title: '出牌阶段', timeoutAt: Date.now() + 42000, timeout: 90 };
+  SGS.setGame(g9);
+  await new Promise((r) => setTimeout(r, 300));
+  const topTimer = $('#g-countdown');
+  check(/\d+s/.test(topTimer.textContent), `顶部显示出牌阶段倒计时（${topTimer.textContent.trim()}）`);
+  const turnTimer = $('#turn-countdown');
+  check(!!turnTimer, '出牌操作栏内也显示倒计时');
+  check(turnTimer && /^\d+s$/.test(turnTimer.textContent.trim()),
+    `操作栏倒计时格式正确（${turnTimer && turnTimer.textContent.trim()}）`);
+  check(turnTimer && topTimer && turnTimer.textContent.trim() === topTimer.textContent.replace('⏱', '').trim(),
+    '两处倒计时数值一致');
+
+  // 倒计时临近时变红
+  g9.pendingPublic.timeoutAt = Date.now() + 2000;
+  SGS.setGame(g9);
+  await new Promise((r) => setTimeout(r, 300));
+  check($('#g-countdown').classList.contains('urgent'), '倒计时不足时顶部计时器变紧急样式');
+  check($('#turn-countdown').classList.contains('urgent'), '倒计时不足时操作栏计时器变紧急样式');
+
+  // 无待操作时不显示倒计时
+  const g9b = fakeGame(6);
+  g9b.pending = null;
+  g9b.pendingPublic = null;
+  SGS.setGame(g9b);
+  await new Promise((r) => setTimeout(r, 300));
+  check($('#g-countdown').textContent.indexOf('--') >= 0, '无待操作时倒计时复位');
+
+  // 9.2 匿名询问：不能知道正在询问谁
+  const g9c = fakeGame(6);
+  g9c.pendingPublic = {
+    seat: null, anonymous: true, kind: 'respond', as: 'jink', style: 'cards',
+    title: '询问是否有人打出【闪】', timeoutAt: Date.now() + 20000, timeout: 25,
+  };
+  SGS.setGame(g9c);
+  await new Promise((r) => setTimeout(r, 60));
+  const wait9 = $('#tc-wait');
+  const txt = wait9.textContent;
+  check(wait9.querySelector('.tw-who').textContent.trim() === '有角色',
+    `匿名询问时只显示「有角色」（${wait9.querySelector('.tw-who').textContent.trim()}）`);
+  for (let i = 1; i <= 6; i++) {
+    if (txt.indexOf(`玩家${i}`) >= 0) { errors.push(`匿名询问泄露了被询问者：玩家${i}`); }
+  }
+  check(!/玩家\d/.test(txt), '匿名询问不会泄露任何玩家昵称');
+  check(txt.indexOf('闪') >= 0, `但仍说明了询问内容（${txt.replace(/\s+/g, ' ').trim()}）`);
+
+  // 非匿名（出牌阶段 / 选择目标）仍应显示是谁
+  const g9d = fakeGame(6);
+  g9d.pendingPublic = { seat: 3, anonymous: false, kind: 'turn', as: null, style: '', title: '出牌阶段', timeoutAt: Date.now() + 30000, timeout: 90 };
+  SGS.setGame(g9d);
+  await new Promise((r) => setTimeout(r, 60));
+  check($('#tc-wait .tw-who').textContent.trim() === '玩家4',
+    `非匿名的操作仍显示行动者（${$('#tc-wait .tw-who').textContent.trim()}）`);
+
   report();
 
   function report() {

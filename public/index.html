@@ -105,6 +105,8 @@
     <div class="gt-left">
       <span class="pill" id="g-round">第 1 轮</span>
       <span class="pill" id="g-phase">准备</span>
+      <span class="pill pill-room" id="g-roomid" title="房间号，其他人用此号加入">房间 ----</span>
+      <span class="pill pill-timer" id="g-countdown" title="本阶段剩余操作时间">⏱ --s</span>
     </div>
     <div class="gt-mid" id="g-role">身份</div>
     <div class="gt-right">
@@ -124,7 +126,10 @@
         <div class="tc-label">牌堆</div>
         <div class="tc-count" id="tc-draw-count">0</div>
       </div>
-      <div class="tc-stage" id="tc-stage"></div>
+      <div class="tc-stage">
+        <div id="tc-stage"></div>
+        <div class="tc-wait" id="tc-wait"></div>
+      </div>
       <div class="tc-pile" id="tc-discard" title="弃牌区">
         <div class="tc-stack discard"></div>
         <div class="tc-label">弃牌区</div>
@@ -133,6 +138,7 @@
     </div>
 
     <div class="seat-ring" id="seat-ring"></div>
+    <div class="fx-banner" id="fx-banner"></div>
     <div class="fx-layer" id="fx-layer"></div>
   </div>
 

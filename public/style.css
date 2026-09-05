@@ -136,7 +136,18 @@ button,input{font-family:inherit}
 /* ---------- 游戏：环形牌桌 ---------- */
 #screen-game{background:radial-gradient(ellipse at 50% 45%,var(--felt) 0%,var(--felt2) 62%,#061511 100%)}
 .game-top{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:8px 10px;background:rgba(0,0,0,.3);font-size:12px;flex:0 0 auto}
-.gt-left,.gt-right{display:flex;gap:6px;align-items:center}
+.gt-left,.gt-right{display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.pill-room{border-color:var(--gold);color:var(--gold);font-family:ui-monospace,Consolas,monospace;letter-spacing:1px}
+/* 顶部倒计时 */
+.pill-timer{font-family:ui-monospace,Consolas,monospace;color:var(--muted)}
+.pill-timer.urgent{border-color:var(--red);color:#ff6b6f;background:rgba(229,72,77,.18);animation:pulse .9s infinite}
+/* 出牌阶段操作栏上的倒计时 */
+.turn-timer{
+  flex:0 0 auto;min-width:44px;text-align:center;font-weight:800;font-size:15px;
+  font-family:ui-monospace,Consolas,monospace;color:var(--gold);
+  background:rgba(0,0,0,.42);border:1px solid var(--line);border-radius:8px;padding:6px 8px;
+}
+.turn-timer.urgent{color:#ff6b6f;border-color:var(--red);background:rgba(229,72,77,.18);animation:pulse .9s infinite}
 .gt-mid{font-size:13px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
 .table{
@@ -166,7 +177,43 @@ button,input{font-family:inherit}
 .tc-stack.discard{background:repeating-linear-gradient(135deg,#4a3a2a 0 6px,#3d3023 6px 12px);border-color:rgba(160,120,70,.5)}
 .tc-label{margin-top:3px;font-size:10.5px;color:var(--muted)}
 .tc-count{font-size:16px;font-weight:700;color:var(--gold);line-height:1.1}
-.tc-stage{width:104px;min-height:92px;display:flex;align-items:center;justify-content:center}
+.tc-stage{width:150px;min-height:92px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px}
+#tc-stage{display:flex;align-items:center;justify-content:center;min-height:80px}
+
+/* 等待提示：向所有人公布当前在等谁、等什么，并倒计时 */
+.tc-wait{
+  display:none;align-items:center;gap:6px;max-width:190px;text-align:center;
+  font-size:10.5px;line-height:1.35;padding:3px 8px;border-radius:999px;
+  background:rgba(0,0,0,.5);border:1px solid var(--line);color:var(--muted);
+}
+.tc-wait.show{display:flex}
+.tc-wait .tw-who{color:var(--gold);font-weight:700}
+.tc-wait .tw-time{
+  flex:0 0 auto;min-width:24px;font-weight:700;color:var(--text);
+  background:rgba(255,255,255,.1);border-radius:999px;padding:0 5px;
+}
+.tc-wait.urgent{border-color:var(--red);animation:pulse .9s infinite}
+.tc-wait.urgent .tw-time{color:#ff6b6f;background:rgba(229,72,77,.22)}
+/* 关键询问（求桃 / 无懈可击）更醒目 */
+.tc-wait.key{
+  background:rgba(0,0,0,.72);border-width:2px;font-size:11px;padding:4px 10px;
+  box-shadow:0 0 14px rgba(0,0,0,.5);
+}
+.tc-wait.key.peach{border-color:#5be08a;color:#c9f7d8}
+.tc-wait.key.peach .tw-who{color:#8ef0ae}
+.tc-wait.key.wuxie{border-color:var(--gold);color:#ffe9a8}
+.tc-wait.key.wuxie .tw-who{color:var(--gold)}
+
+/* 全场横幅：无懈可击询问等重要提示 */
+.fx-banner{
+  position:absolute;left:50%;top:8%;transform:translate(-50%,-8px);
+  z-index:12;pointer-events:none;opacity:0;transition:.25s;
+  background:rgba(0,0,0,.82);border:1px solid var(--line);border-radius:999px;
+  padding:6px 16px;font-size:12.5px;color:var(--text);white-space:nowrap;
+  max-width:92%;overflow:hidden;text-overflow:ellipsis;
+}
+.fx-banner.show{opacity:1;transform:translate(-50%,0)}
+.fx-banner.wuxie{border-color:var(--gold);color:#ffe9a8;box-shadow:0 0 18px rgba(217,180,91,.45)}
 
 /* 座位环 */
 .seat-ring{position:absolute;inset:0;z-index:3}
@@ -195,8 +242,24 @@ button,input{font-family:inherit}
 .seat .s-hp{font-size:11.5px}
 .seat .s-hp b{color:#ff8a8a}
 .seat .s-row{display:flex;flex-wrap:wrap;gap:3px;margin-top:3px}
-.seat .mini{border:1px solid var(--line);border-radius:4px;padding:1px 4px;font-size:9.5px;background:rgba(0,0,0,.35);cursor:pointer}
-.seat .mini.judge{border-color:var(--purple);color:#d7bfff}
+/* 装备标签：按槽位区分边框与配色，便于一眼分辨 */
+.seat .mini{
+  border-radius:4px;padding:1px 5px;font-size:9.5px;background:rgba(0,0,0,.45);cursor:pointer;
+  border:1px solid var(--line);
+}
+.seat .mini.eq-weapon{border-color:#e5805f;color:#ffb99e;box-shadow:inset 0 0 0 1px rgba(229,128,95,.18)}
+.seat .mini.eq-armor{border-color:#6fb3ff;color:#a9d3ff;box-shadow:inset 0 0 0 1px rgba(111,179,255,.18)}
+.seat .mini.eq-horsePlus{border-color:#7bd88f;color:#b6f0c2;box-shadow:inset 0 0 0 1px rgba(123,216,143,.18)}
+.seat .mini.eq-horseMinus{border-color:#c9a2ff;color:#ddc4ff;box-shadow:inset 0 0 0 1px rgba(201,162,255,.18)}
+.seat .mini.judge{border-color:var(--purple);color:#d7bfff;background:rgba(154,107,255,.14)}
+/* 自己装备栏的装备牌：更大、边框更明显 */
+.me-equips .mini{
+  border-radius:5px;padding:2px 7px;font-size:11px;background:rgba(0,0,0,.42);
+}
+.me-equips .mini.eq-weapon{border-color:#e5805f;color:#ffb99e}
+.me-equips .mini.eq-armor{border-color:#6fb3ff;color:#a9d3ff}
+.me-equips .mini.eq-horsePlus{border-color:#7bd88f;color:#b6f0c2}
+.me-equips .mini.eq-horseMinus{border-color:#c9a2ff;color:#ddc4ff}
 .info-btn{
   flex:0 0 auto;width:16px;height:16px;line-height:14px;text-align:center;border-radius:50%;
   border:1px solid var(--line);background:rgba(0,0,0,.35);color:var(--muted);font-size:10px;cursor:pointer;
@@ -205,17 +268,33 @@ button,input{font-family:inherit}
 
 /* 动画层 */
 .fx-layer{position:absolute;inset:0;pointer-events:none;z-index:9;overflow:hidden}
-/* 打出的牌：从中央弹出并停留后淡出 */
+/* 打出的牌：从中央弹出并停留后淡出；--fx-hold 控制总时长（判定牌停留更久） */
 .fx-card{
   position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
-  animation:fxCardIn 1.5s ease-out forwards;
+  --fx-hold:1600ms;
+  animation:fxCardIn var(--fx-hold) ease-out forwards;
 }
 @keyframes fxCardIn{
   0%{opacity:0;transform:translate(-50%,-50%) scale(.4) rotate(-14deg)}
-  18%{opacity:1;transform:translate(-50%,-50%) scale(1.14) rotate(3deg)}
-  30%{transform:translate(-50%,-50%) scale(1) rotate(0)}
-  78%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}
+  8%{opacity:1;transform:translate(-50%,-50%) scale(1.14) rotate(3deg)}
+  13%{transform:translate(-50%,-50%) scale(1) rotate(0)}
+  88%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0)}
   100%{opacity:0;transform:translate(-50%,-58%) scale(.9)}
+}
+/* 判定牌：加一圈金色光晕并轻微呼吸，方便所有人看清 */
+.fx-card.fx-judge .card{
+  border:2px solid var(--gold);
+  box-shadow:0 0 0 3px rgba(217,180,91,.35),0 0 22px rgba(217,180,91,.55);
+  animation:judgePulse 1s ease-in-out infinite;
+}
+@keyframes judgePulse{
+  0%,100%{box-shadow:0 0 0 3px rgba(217,180,91,.3),0 0 18px rgba(217,180,91,.45)}
+  50%{box-shadow:0 0 0 5px rgba(217,180,91,.5),0 0 30px rgba(217,180,91,.75)}
+}
+/* 被过河拆桥弃置的牌：红色标注 */
+.fx-card.fx-destroy .card{
+  border:2px solid var(--red);
+  box-shadow:0 0 0 3px rgba(229,72,77,.3),0 0 20px rgba(229,72,77,.5);
 }
 /* 伤害/回血飘字 */
 .fx-float{
@@ -243,15 +322,23 @@ button,input{font-family:inherit}
 }
 
 @media (prefers-reduced-motion: reduce){
-  .fx-card,.fx-float,.seat.hit,.seat.heal,.seat.dying{animation-duration:.01ms !important}
+  .fx-card,.fx-float,.seat.hit,.seat.heal,.seat.dying,.seat.hit .s-hp b,.fx-card.fx-judge .card{animation-duration:.01ms !important}
 }
+/* 受击闪烁（扣血）：红闪 + 左右震动 */
 @keyframes seatHit{
-  0%,100%{background:rgba(4,20,16,.88)}
-  20%{background:rgba(229,72,77,.6);transform:translate(-50%,-50%) translateX(-6px)}
-  45%{background:rgba(229,72,77,.35);transform:translate(-50%,-50%) translateX(5px)}
-  70%{background:rgba(4,20,16,.88);transform:translate(-50%,-50%) translateX(0)}
+  0%,100%{background:rgba(4,20,16,.88);transform:translate(-50%,-50%) translateX(0)}
+  15%{background:rgba(229,72,77,.75);transform:translate(-50%,-50%) translateX(-7px) scale(1.06)}
+  35%{background:rgba(229,72,77,.45);transform:translate(-50%,-50%) translateX(6px) scale(1.03)}
+  55%{background:rgba(229,72,77,.6);transform:translate(-50%,-50%) translateX(-4px)}
+  75%{background:rgba(4,20,16,.88);transform:translate(-50%,-50%) translateX(2px)}
 }
-.seat.hit{animation:seatHit .5s ease-out}
+.seat.hit{animation:seatHit .62s ease-out;z-index:4}
+/* 受击时体力数字放大闪红，扣血更明显 */
+.seat.hit .s-hp b{animation:hpShake .62s ease-out}
+@keyframes hpShake{
+  0%,100%{transform:scale(1);color:#ff8a8a}
+  30%{transform:scale(1.7);color:#ff3b41}
+}
 @keyframes seatHeal{0%,100%{background:rgba(4,20,16,.88)}35%{background:rgba(91,224,138,.42)}}
 .seat.heal{animation:seatHeal .6s ease-out}
 @keyframes seatDie{0%{opacity:1}100%{opacity:.42;filter:grayscale(1)}}

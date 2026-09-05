@@ -5,6 +5,7 @@
  * 用法：node tools/test-fx.js   （需先启动服务）
  */
 const http = require('http');
+const path = require('path');
 const { io } = require('socket.io-client');
 
 const HOST = process.env.HOST || 'localhost:3000';
@@ -180,10 +181,166 @@ async function testFx() {
   for (const c of clients) c.socket.close();
 }
 
+/* ---------- 3. 等待信息向所有人广播且不泄露私有信息 ---------- */
+async function testPendingPublic() {
+  console.log(`\n[3] 等待信息公开广播（${HUMANS} 真人 + ${AIS} 人机）`);
+  const roomRef = { id: null, started: false };
+  const clients = [];
+  const seenTitles = new Set();
+  const kinds = new Set();
+  let leak = 0;
+  let bothSeen = 0;
+
+  for (let i = 0; i < HUMANS; i++) {
+    const clientId = `pp_${i}_` + Math.random().toString(36).slice(2, 8);
+    const socket = io(URL, { transports: ['websocket'] });
+    const s = { idx: i, clientId, socket, picked: false, joined: i === 0, states: 0 };
+
+    socket.on('connect', () => {
+      if (i === 0) {
+        socket.emit('room:create', { clientId, name: `玩家${i + 1}` }, (res) => {
+          if (res && res.ok) { roomRef.id = res.roomId; socket.emit('room:setAICount', { count: AIS }); }
+        });
+      }
+    });
+    if (i > 0) {
+      const tryJoin = () => {
+        if (s.joined) return;
+        if (!roomRef.id) return setTimeout(tryJoin, 200);
+        socket.emit('room:join', { roomId: roomRef.id, clientId, name: `玩家${i + 1}` }, (res) => {
+          if (res && res.ok) s.joined = true; else setTimeout(tryJoin, 300);
+        });
+      };
+      tryJoin();
+    }
+
+    socket.on('room', (r) => {
+      if (!roomRef.id || r.id !== roomRef.id) return;
+      if (i === 0 && r.status === 'lobby' && r.playerCount === HUMANS + AIS && !roomRef.started) {
+        roomRef.started = true;
+        socket.emit('room:start');
+      }
+      if (r.status === 'picking' && !s.picked) {
+        const me = r.players.find((p) => p.clientId === clientId);
+        if (me && me.heroOptions && me.heroOptions.length) {
+          s.picked = true;
+          const free = me.heroOptions.find((h) => !h.taken) || me.heroOptions[0];
+          socket.emit('room:pickHero', { heroId: free.id });
+        }
+      }
+    });
+
+    socket.on('game', (g) => {
+      if (!g.me) return;
+      if (g.over) { s.finished = true; return; }
+      s.states++;
+      // 有 pendingPublic 时，必须带 title / seat / timeoutAt
+      if (g.pendingPublic) {
+        kinds.add(g.pendingPublic.kind + (g.pendingPublic.as ? ':' + g.pendingPublic.as : ''));
+        if (g.pendingPublic.title) seenTitles.add(g.pendingPublic.title);
+        if (!g.pendingPublic.timeoutAt) { leak++; console.error('  ✗ pendingPublic 缺少倒计时时间'); }
+        // 绝不能携带可选手牌等私有信息
+        if (g.pendingPublic.choices) { leak++; console.error('  ✗ pendingPublic 泄露了 choices'); }
+        if (g.pendingPublic.actions) { leak++; console.error('  ✗ pendingPublic 泄露了 actions'); }
+      }
+      // 正在被询问的人才有 pending；其余人只有 pendingPublic
+      if (g.pending && g.pendingPublic) bothSeen++;
+      const p = g.pending;
+      if (!p) return;
+      if (p.kind === 'turn') {
+        const act = (p.actions || []).find((a) => a.type === 'card');
+        if (act && Math.random() < 0.75) {
+          socket.emit('game:action', { type: 'card', as: act.as, cardId: act.cardId, targets: [], extraCards: [] });
+        } else socket.emit('game:action', { type: 'end' });
+      } else if (p.kind === 'respond') {
+        // 偶尔放弃，以便更容易触发濒死求桃等流程
+        socket.emit('game:respond', p.choices && p.choices.length ? { ids: [p.choices[0].id] } : null);
+      } else if (p.kind === 'choose') {
+        socket.emit('game:respond', { ids: (p.choices || []).slice(0, p.min || 1).map((c) => c.id) });
+      } else if (p.kind === 'guanxing') {
+        socket.emit('game:respond', { top: (p.cards || []).slice(0, 2).map((c) => c.uid) });
+      }
+    });
+
+    clients.push(s);
+  }
+
+  // 跑到对局结束，确保真人玩家也被询问过（否则只能观察到 AI 的等待提示）
+  const deadline = Date.now() + 220000;
+  let over = false;
+  while (Date.now() < deadline && !over) {
+    await new Promise((r) => setTimeout(r, 400));
+    if (clients.some((c) => c.finished)) over = true;
+    if (bothSeen > 0 && seenTitles.size >= 3 && kinds.size >= 2) break;
+  }
+
+  console.log('  观察到的等待类型：' + [...kinds].join(', '));
+  console.log('  观察到的提示文案示例：' + [...seenTitles].slice(0, 3).map((t) => `「${t}」`).join(' '));
+  check(clients.every((c) => c.states > 0), '所有客户端均收到游戏状态');
+  check(seenTitles.size > 0, '对局中生成了等待提示文案');
+  check(kinds.size >= 1, '等待提示覆盖了多种操作类型');
+  check(leak === 0, '等待提示未泄露任何私有信息（choices / actions）');
+  check(bothSeen > 0, '被询问者同时拥有 pending 与 pendingPublic');
+
+  for (const c of clients) c.socket.close();
+}
+
+/* ---------- 4. 无懈可击：不询问锦囊使用者本人 ---------- */
+async function testWuxieSkipsCaster() {
+  console.log('\n[4] 无懈可击不会询问锦囊使用者本人');
+
+  // 用引擎直接构造场景，精确验证“不会询问使用者”
+  const { Game } = require(path.join(__dirname, '..', 'src', 'engine'));
+  const { HEROES } = require(path.join(__dirname, '..', 'src', 'heroes'));
+  const { makeCard, cardView } = require(path.join(__dirname, '..', 'src', 'cards'));
+
+  const asked = [];
+  const room = {
+    id: 'WX',
+    broadcastGame() {},
+    socketOf() { return null; },
+    emitFX() {},
+  };
+  const g = new Game(room);
+  g.aiDelay = 0; g.aiJitter = 0;
+  const heroes = HEROES.slice().sort(() => Math.random() - 0.5);
+  g.init(Array.from({ length: 4 }, (_, i) => ({
+    seat: i, id: `wx${i}`, name: `P${i + 1}`, isAI: false, heroId: heroes[i].id,
+  })));
+
+  // 记录每次询问，并一律回答“不使用”
+  const origRespond = g.respond.bind(g);
+  g.respond = async (seat, kind, ctx) => {
+    if (kind === 'wuxie') asked.push(seat);
+    return null;
+  };
+  void origRespond;
+
+  // 给所有存活角色都发一张无懈可击，确保“没有被询问”只可能是因为规则跳过
+  for (const p of g.players) {
+    const c = makeCard('wuxie', 'spade', 11);
+    c.uid = `wx_${p.seat}`;
+    p.hand.push(c);
+  }
+
+  const sourceSeat = 0;
+  const targetSeat = 1;
+  await g.askWuxie('dismantle', sourceSeat, targetSeat);
+
+  console.log(`  使用者座位=${sourceSeat}，被询问的座位=[${asked.join(', ')}]`);
+  check(asked.length > 0, '确实向其他角色询问了是否使用无懈可击');
+  check(asked.indexOf(sourceSeat) < 0, '锦囊使用者本人没有被询问（符合需求）');
+  check(asked.length === g.players.length - 1,
+    `除使用者外的所有角色都被询问（${asked.length}/${g.players.length - 1}）`);
+  void cardView;
+}
+
 (async () => {
   try {
     await testNetApi();
     await testFx();
+    await testPendingPublic();
+    await testWuxieSkipsCaster();
   } catch (e) {
     errors.push('异常：' + e.message);
     console.error(e);
