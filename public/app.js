@@ -24,6 +24,7 @@
     room: null,
     game: null,
     sel: null,          // 出牌选择 {uid, as, action, extra:[], targets:[], options:[]}
+    pinned: null,       // 询问响应期间常驻展示的上一张牌
     chooseSel: [],      // choose 请求已选 id
     lastReqId: null,
     gx: { top: [] },    // 观星
@@ -52,7 +53,6 @@
   $('#input-name').value = state.name;
   const q = new URLSearchParams(location.search).get('room');
   if (q) $('#input-room').value = q.toUpperCase();
-  loadNetAddresses();
 
   /* ================= 大厅 ================= */
   function getName() {
@@ -62,37 +62,6 @@
     localStorage.setItem('sgs_name', state.name);
     return state.name;
   }
-
-  /* ---------- 局域网访问地址（供其他人加入） ---------- */
-  async function loadNetAddresses() {
-    const box = $('#net-list');
-    try {
-      const res = await fetch('/api/net');
-      if (!res.ok) throw new Error('HTTP ' + res.status);
-      const net = await res.json();
-      const cur = (net.host || net.current || '').replace(/:\d+$/, '');
-      const list = net.urls && net.urls.length ? net.urls : [`http://localhost:${net.port || 3000}`];
-      box.innerHTML = list.map((url) => {
-        const host = url.replace(/^http:\/\//, '').replace(/:\d+$/, '');
-        const isCur = host === cur || host === 'localhost' || host === '127.0.0.1';
-        return `<div class="net-item ${isCur ? 'cur' : ''}">
-          <span class="net-tag">${isCur ? '本机' : '局域网'}</span>
-          <span class="net-url"><b>${esc(url)}</b></span>
-          <button class="btn btn-xs net-copy" data-copy="${esc(url)}">复制</button>
-        </div>`;
-      }).join('');
-    } catch (e) {
-      box.innerHTML = `<span class="muted">无法获取网络地址（${esc(e.message)}）。<br>其他人可访问 <b>http://&lt;本机IP&gt;:${esc(location.port || '3000')}</b> 加入。</span>`;
-    }
-  }
-
-  $('#net-list').addEventListener('click', (e) => {
-    const btn = e.target.closest('[data-copy]');
-    if (!btn) return;
-    const url = btn.dataset.copy;
-    if (navigator.clipboard) navigator.clipboard.writeText(url).then(() => toast('已复制：' + url), () => toast(url));
-    else toast(url);
-  });
 
   $('#btn-create').addEventListener('click', () => {
     const name = getName();
@@ -443,6 +412,9 @@
       turnTimer.className = 'turn-timer' + (urgent ? ' urgent' : '');
     }
 
+    // 询问响应期间，牌桌上常驻展示引发这次询问的那张牌
+    renderPinned();
+
     if (!box) return;
     // 响应类请求是匿名的：只说在问什么，不说在问谁
     const who = w.seat === null || w.seat === undefined
@@ -518,6 +490,129 @@
     bannerTimer = setTimeout(() => { box.className = 'fx-banner'; }, ms || 2200);
   }
 
+  /* ---------- 询问期间常驻展示“上一张牌” ---------- */
+  // 例如 A 对 B 使用【顺手牵羊】，询问 B 是否打出【无懈可击】期间，
+  // 牌桌上要一直显示“A 对 B 使用【顺手牵羊】”，而不是一闪而过。
+  function setPinned(info) {
+    if (!info || !info.card) return;
+    state.pinned = info;
+    renderPinned();
+  }
+
+  /** 动画层里是否正在展示这张牌（避免与常驻牌重复显示同一张） */
+  function fxCardOnScreen(uid) {
+    return !!(uid && document.querySelector(`#fx-layer .fx-card [data-uid="${uid}"]`));
+  }
+
+  function renderPinned() {
+    const stage = $('#tc-stage');
+    if (!stage) return;
+    const g = state.game;
+    const w = g && g.pendingPublic;
+    const asking = !!w && w.kind === 'respond';
+    const pin = state.pinned;
+    // 同一张牌若正在以飞出动画展示，就先不渲染常驻牌，否则屏幕上会同时出现两张
+    if (!asking || !pin || fxCardOnScreen(pin.card.uid)) {
+      if (stage.dataset.uid) { stage.innerHTML = ''; delete stage.dataset.uid; }
+      return;
+    }
+    if (stage.dataset.uid === pin.card.uid) return; // 已经展示，避免重复重绘
+    stage.dataset.uid = pin.card.uid;
+    const targets = (pin.targets || []).filter(Boolean);
+    stage.innerHTML = `
+      <div class="pinned">
+        <div class="card ${pin.card.color === 'red' ? 'red' : 'black'} ${typeCls(pin.card)}" style="cursor:default">${cardInner(pin.card)}</div>
+        <div class="pinned-who">${esc(pin.who || '')}${targets.length ? ' 对 ' + esc(targets.join('、')) : ''} 使用</div>
+      </div>`;
+  }
+
+  /* ---------- 五谷丰登：公示所有牌 ---------- */
+  function showHarvestReveal(cards, hold) {
+    const layer = $('#fx-layer');
+    if (!layer || !cards.length) return;
+    const node = document.createElement('div');
+    node.className = 'fx-reveal';
+    node.innerHTML = `<div class="fr-title">五谷丰登 · 公示</div>
+      <div class="fr-cards">${cards.map((c) => `
+        <div class="card ${c.color === 'red' ? 'red' : 'black'} ${typeCls(c)}" style="cursor:default">${cardInner(c)}</div>`).join('')}</div>`;
+    layer.appendChild(node);
+    // 居中显示
+    requestAnimationFrame(() => {
+      const lr = layer.getBoundingClientRect();
+      node.style.left = '50%';
+      node.style.top = '50%';
+      void lr;
+    });
+    setTimeout(() => node.remove(), hold + 300);
+  }
+
+  /* ---------- 判定生效 / 失效 ---------- */
+  function showJudgeResult(fx) {
+    const layer = $('#fx-layer');
+    if (!layer) return;
+    const ok = fx.effect;
+    const node = document.createElement('div');
+    node.className = 'fx-judge-result ' + (ok ? 'on' : ok === false ? 'off' : '');
+    node.dataset.fxGroup = 'judge';
+    node.innerHTML = `
+      <div class="jr-head">${ok ? '判定生效' : ok === false ? '判定失效' : '判定'}</div>
+      <div class="card ${fx.card && fx.card.color === 'red' ? 'red' : 'black'} ${fx.card ? typeCls(fx.card) : ''}" style="cursor:default">${fx.card ? cardInner(fx.card) : ''}</div>
+      <div class="jr-who">【${esc(fx.reason || '判定')}】在 ${esc(fx.name || '')} 身上判定</div>
+      <div class="jr-text">${esc(fx.text || '')}</div>`;
+    layer.appendChild(node);
+    // 与其它判定并排展示，并避开中央常驻的牌
+    relayoutFx('judge');
+    // 同时在对应座位上播放效果
+    if (ok) flashSeat(fx.seat, 'hit', 1200); else if (ok === false) flashSeat(fx.seat, 'heal', 1200);
+    setTimeout(() => { node.remove(); relayoutFx('judge'); }, 3000);
+  }
+
+  /** 中央是否正在常驻展示某张牌（询问期间） */
+  function pinnedActive() {
+    return !!($('#tc-stage') && $('#tc-stage .pinned'));
+  }
+
+  /**
+   * 同一组特效同时出现时横向均匀排开，避免互相重叠。
+   * 每有新增或移除都对整组重新计算，保证已有元素也会让位。
+   */
+  const FX_GROUP_GAP = { card: 132, judge: 178 };
+  // 同组最多同时展示几张，超出时移除最早的，避免快速连续出牌时堆成一排
+  const FX_GROUP_MAX = { card: 3, judge: 3 };
+  // 不同组的垂直位置（占牌桌高度比例），保证彼此不重叠
+  const FX_GROUP_TOP = {
+    card: { normal: 0.36, pinned: 0.20 },
+    judge: { normal: 0.74, pinned: 0.80 },
+  };
+
+  function fxTop(group, lr) {
+    const t = FX_GROUP_TOP[group] || FX_GROUP_TOP.card;
+    return lr.height * (pinnedActive() ? t.pinned : t.normal);
+  }
+
+  function relayoutFx(group) {
+    const layer = $('#fx-layer');
+    if (!layer) return;
+    let same = Array.from(layer.querySelectorAll(`[data-fx-group="${group}"]`));
+    // 数量超限时移除最早的
+    const max = FX_GROUP_MAX[group] || 3;
+    if (same.length > max) {
+      same.slice(0, same.length - max).forEach((el) => el.remove());
+      same = same.slice(same.length - max);
+    }
+    const n = same.length;
+    const gap = FX_GROUP_GAP[group] || 132;
+    const lr = layer.getBoundingClientRect();
+    const baseX = lr.width / 2;
+    const top = fxTop(group, lr);
+    same.forEach((el, i) => {
+      const dx = n <= 1 ? 0 : (i - (n - 1) / 2) * gap;
+      el.style.left = (baseX + dx) + 'px';
+      el.style.top = top + 'px';
+      el.style.setProperty('--fx-dx', dx + 'px');
+    });
+  }
+
   /** 中央舞台展示刚打出/公示的牌；hold 为停留毫秒（判定牌需要停留更久） */
   function showPlayedCard(fx, opts) {
     const stage = $('#tc-stage');
@@ -528,22 +623,26 @@
     const who = state.game ? (state.game.players[fx.seat] || {}).name : '';
     const node = document.createElement('div');
     node.className = 'fx-card' + (tag ? ' ' + tag : '');
+    node.dataset.fxGroup = (tag === 'fx-judge' || fx.reason) ? 'judge' : 'card';
     node.style.setProperty('--fx-hold', hold + 'ms');
     const targetNames = (fx.targets || []).map((s) => (state.game && state.game.players[s] ? state.game.players[s].name : '')).filter(Boolean);
     node.innerHTML = `
-      <div class="card ${fx.card.color === 'red' ? 'red' : 'black'} ${typeCls(fx.card)}" style="cursor:default">
+      <div class="card ${fx.card.color === 'red' ? 'red' : 'black'} ${typeCls(fx.card)}" data-uid="${fx.card.uid}" style="cursor:default">
         ${cardInner(fx.card)}
       </div>
       <div class="fx-who">${esc((opts && opts.who) || who || '')}${targetNames.length ? ' → ' + esc(targetNames.join('、')) : ''}</div>`;
     if (layer) {
-      const lr = layer.getBoundingClientRect();
-      node.style.left = lr.width / 2 + 'px';
-      node.style.top = lr.height / 2 + 'px';
       layer.appendChild(node);
+      // 位置（含与其它特效的并排、避开中央常驻牌）统一由 relayoutFx 计算
+      relayoutFx(node.dataset.fxGroup || 'card');
     } else {
       stage.appendChild(node);
     }
-    setTimeout(() => node.remove(), hold + 120);
+    setTimeout(() => {
+      const g = node.dataset.fxGroup;
+      node.remove();
+      if (g) relayoutFx(g);
+    }, hold + 120);
   }
 
   /** 处理服务端推送的动画/音效事件 */
@@ -554,6 +653,10 @@
 
     switch (fx.type) {
       case 'play':
+        // 记住当前这张牌：后续询问别人是否响应时，牌桌上要一直显示它
+        setPinned({ card: fx.card, who: whoName(fx.seat), targets: (fx.targets || []).map(whoName) });
+        showPlayedCard(fx);
+        break;
       case 'respond':
         showPlayedCard(fx);
         break;
@@ -585,9 +688,27 @@
         if (fx.seat === mySeat) toast('你已进入濒死状态，等待他人救援');
         else floatText(fx.seat, '濒死', 'dmg');
         break;
-      case 'askWuxie':
+      case 'askWuxie': {
         // 全场提示：正在询问是否有人使用无懈可击
         showBanner(`询问是否使用【无懈可击】抵消【${cardCn(fx.cardName)}】`, 'wuxie', 2600);
+        // 判定区结算时（乐不思蜀/闪电等）此前没有出牌事件，用锦囊本身作为常驻展示
+        if (fx.card) setPinned({ card: fx.card, who: whoName(fx.bySeat), targets: fx.targetSeat != null ? [whoName(fx.targetSeat)] : [] });
+        break;
+      }
+      case 'harvestReveal':
+        // 五谷丰登：先把所有牌向全场公示
+        showHarvestReveal(fx.cards || [], fx.hold || 1000);
+        break;
+      case 'judgeResult':
+        // 判定生效 / 失效：明确展示“什么牌在谁身上判定”
+        showJudgeResult(fx);
+        break;
+      case 'showCard':
+        floatText(fx.seat, '展示手牌', 'heal');
+        showPlayedCard({ card: fx.card, seat: fx.seat, targets: [] }, { hold: 1800 });
+        break;
+      case 'armorEffect':
+        floatText(fx.seat, fx.blocked ? '防具免疫' : '防具触发', fx.blocked ? 'heal' : 'dmg');
         break;
       case 'destroy':
         // 过河拆桥弃置的牌向全场公示
@@ -814,6 +935,9 @@
       crossbow: '诸葛连弩', qinggang: '青釭剑', shuanggu: '雌雄双股剑', guanshi: '贯石斧', qinglong: '青龙偃月刀',
       zhangba: '丈八蛇矛', fangtian: '方天画戟', qilin: '麒麟弓', bagua: '八卦阵', renwang: '仁王盾',
       dilu: '的卢', jueying: '绝影', zhuahuang: '爪黄飞电', chitu: '赤兔', zixun: '紫骍', dayuan: '大宛',
+      fire: '火杀', thunder: '雷杀', bingliang: '兵粮寸断', huogong: '火攻',
+      hanbing: '寒冰剑', guding: '古锭刀', zhuque: '朱雀羽扇', tengjia: '藤甲', baiyin: '白银狮子',
+      hualiu: '骅骝', huawei: '快航',
     };
     return MAP[name] || name;
   }

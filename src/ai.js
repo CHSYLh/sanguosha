@@ -194,11 +194,19 @@ function decideTurn(G, p, req) {
     if (t && enemyScore(G, p, t) > 0) return toPlay(G, p, a, [t.seat]);
   }
 
-  // 乐不思蜀
-  const lebu = find('lebu');
-  if (lebu) {
-    const t = bestEnemy(G, p, lebu.targets);
-    if (t && enemyScore(G, p, t) > 2) return toPlay(G, p, lebu, [t.seat]);
+  // 火攻：对敌人造成火焰伤害（优先残血敌人）
+  const huogong = find('huogong');
+  if (huogong) {
+    const t = bestEnemy(G, p, huogong.targets);
+    if (t && enemyScore(G, p, t) > 2) return toPlay(G, p, huogong, [t.seat]);
+  }
+
+  // 乐不思蜀 / 兵粮寸断：限制强力敌人
+  for (const as of ['lebu', 'bingliang']) {
+    const a = find(as);
+    if (!a) continue;
+    const t = bestEnemy(G, p, a.targets);
+    if (t && enemyScore(G, p, t) > 2) return toPlay(G, p, a, [t.seat]);
   }
 
   // 决斗 / 借刀杀人
@@ -209,9 +217,10 @@ function decideTurn(G, p, req) {
     if (t && enemyScore(G, p, t) > 0) return toPlay(G, p, a, [t.seat]);
   }
 
-  // 出杀
+  // 出杀（属性杀优先，可破藤甲且伤害更高）
+  const elemSlash = cardActs.find((a) => a.as === 'fire' || a.as === 'thunder') || slashActs[0];
   if (slashActs.length) {
-    const a = slashActs[0];
+    const a = elemSlash;
     const cands = a.targets.map((s) => G.players[s]).filter((t) => t && enemyScore(G, p, t) > 0);
     if (cands.length) {
       cands.sort((x, y) => enemyScore(G, p, y) - enemyScore(G, p, x));
@@ -296,7 +305,13 @@ function decideRespond(G, p, req) {
     if (!dying || !shouldSave(G, p, dying)) return null;
     const usable = choices.filter((c) => c.id !== 'bagua');
     if (!usable.length) return null;
-    const pick = usable.slice().sort((a, b) => G.cardValue(p, a.card) - G.cardValue(p, b.card))[0];
+    // 救援时优先使用真正的【桃】，把【酒】留作进攻/自保
+    const pick = usable.slice().sort((a, b) => {
+      const pa = a.card && a.card.name === 'peach' ? 0 : 1;
+      const pb = b.card && b.card.name === 'peach' ? 0 : 1;
+      if (pa !== pb) return pa - pb;
+      return G.cardValue(p, a.card) - G.cardValue(p, b.card);
+    })[0];
     return { ids: [pick.id] };
   }
 

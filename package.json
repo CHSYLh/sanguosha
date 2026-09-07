@@ -10,7 +10,9 @@
     "test:all": "node tools/simulate-all.js",
     "test:e2e": "node tools/e2e.js",
     "test:fx": "node tools/test-fx.js",
-    "test:ui": "node tools/test-ui.js"
+    "test:ui": "node tools/test-ui.js",
+    "test:cards": "node tools/test-cards.js",
+    "test:rules": "node tools/test-rules.js"
   },
   "keywords": [
     "sanguosha",

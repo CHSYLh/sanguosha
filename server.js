@@ -143,6 +143,23 @@ io.on('connection', (socket) => {
 
 setInterval(cleanup, 5 * 60 * 1000);
 
+// 端口被占用（例如已经在别处启动过）时给出友好提示，而不是抛出未捕获异常
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.log('');
+    console.log(`  端口 ${PORT} 已被占用 —— 服务已经在运行了。`);
+    console.log('');
+    console.log(`  请直接访问：http://localhost:${PORT}`);
+    console.log('  如需重新启动，请先关闭之前那个运行窗口，或换一个端口：');
+    console.log('    set PORT=3001 && npm start      （cmd）');
+    console.log('    $env:PORT=3001; npm start       （PowerShell）');
+    console.log('');
+    process.exit(0);
+  }
+  console.error('[启动失败]', err && err.message ? err.message : err);
+  process.exit(1);
+});
+
 server.listen(PORT, '0.0.0.0', () => {
   const info = netInfo(null, PORT);
   console.log('');
@@ -155,5 +172,7 @@ server.listen(PORT, '0.0.0.0', () => {
   }
   console.log('');
   console.log('   若其他设备无法连接，请检查 Windows 防火墙是否放行该端口。');
+  console.log('');
+  console.log('   关闭本窗口即可停止服务。');
   console.log('');
 });

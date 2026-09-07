@@ -19,6 +19,8 @@ const NUM_CN = { 1: 'A', 11: 'J', 12: 'Q', 13: 'K' };
 const CARD_META = {
   /* ===== 基本牌 ===== */
   slash: { cn: '杀', type: 'basic', mode: 'enemy', min: 1, max: 1, desc: '对攻击范围内的一名其他角色使用，其需打出一张【闪】，否则受到你造成的1点伤害。每回合限使用一次。' },
+  fire: { cn: '火杀', type: 'basic', mode: 'enemy', min: 1, max: 1, element: 'fire', desc: '火焰【杀】：用法同【杀】，但造成火焰伤害。对装备【藤甲】的角色伤害+1，且【藤甲】无法免疫。' },
+  thunder: { cn: '雷杀', type: 'basic', mode: 'enemy', min: 1, max: 1, element: 'thunder', desc: '雷电【杀】：用法同【杀】，但造成雷电伤害。【藤甲】无法免疫。' },
   jink: { cn: '闪', type: 'basic', mode: '-', desc: '抵消【杀】的效果。' },
   peach: { cn: '桃', type: 'basic', mode: 'heal', desc: '回复1点体力；当一名角色处于濒死状态时，可对其使用令其回复至1点体力。' },
   wine: { cn: '酒', type: 'basic', mode: 'self', desc: '出牌阶段对自己使用，令你下一张【杀】造成的伤害+1（每回合限一次）；濒死时可对自己使用，回复1点体力。' },
@@ -33,10 +35,12 @@ const CARD_META = {
   harvest: { cn: '五谷丰登', type: 'scroll', mode: 'all', desc: '亮出牌堆顶的等量牌，所有角色依次各选择一张。' },
   orchard: { cn: '桃园结义', type: 'scroll', mode: 'all', desc: '所有存活角色各回复1点体力。' },
   borrow: { cn: '借刀杀人', type: 'scroll', mode: 'enemy', min: 1, max: 1, desc: '令一名有武器的角色对其攻击范围内的角色使用【杀】，若其不如此做，你获得其武器。' },
+  huogong: { cn: '火攻', type: 'scroll', mode: 'enemy', min: 1, max: 1, desc: '目标角色展示一张手牌，若你能弃置一张同花色的手牌，你对其造成1点火焰伤害。' },
   wuxie: { cn: '无懈可击', type: 'scroll', mode: '-', desc: '抵消一张锦囊牌对一名角色的效果。' },
 
   /* ===== 延时类锦囊 ===== */
   lebu: { cn: '乐不思蜀', type: 'delayed', mode: 'enemy', min: 1, max: 1, desc: '置于目标判定区，其回合开始判定：若不为红桃，则跳过出牌阶段。' },
+  bingliang: { cn: '兵粮寸断', type: 'delayed', mode: 'enemy', min: 1, max: 1, range: 1, desc: '置于距离1以内一名其他角色的判定区，其回合开始判定：若不为梅花，则跳过摸牌阶段。' },
   lightning: { cn: '闪电', type: 'delayed', mode: 'self', desc: '置于自己判定区，回合开始判定：若为黑桃2~9，受到3点雷电伤害并无来源结算，否则传给下家。' },
 
   /* ===== 装备 / 武器 ===== */
@@ -50,8 +54,13 @@ const CARD_META = {
   qilin: { cn: '麒麟弓', type: 'equip', sub: 'weapon', range: 5, desc: '攻击范围5；你用【杀】造成伤害后，可弃置其一张坐骑。' },
 
   /* ===== 装备 / 防具 ===== */
+  hanbing: { cn: '寒冰剑', type: 'equip', sub: 'weapon', range: 2, desc: '攻击范围2；你用【杀】造成伤害时，可防止该伤害，改为弃置其两张牌。' },
+  guding: { cn: '古锭刀', type: 'equip', sub: 'weapon', range: 2, desc: '攻击范围2；你用【杀】对没有手牌的角色造成伤害时，伤害+1。' },
+  zhuque: { cn: '朱雀羽扇', type: 'equip', sub: 'weapon', range: 4, desc: '攻击范围4；你可以将普通【杀】当火焰【杀】使用。' },
   bagua: { cn: '八卦阵', type: 'equip', sub: 'armor', desc: '需要打出【闪】时，你可判定：若结果为红色，视为打出一张【闪】。' },
   renwang: { cn: '仁王盾', type: 'equip', sub: 'armor', desc: '黑色【杀】对你无效。' },
+  tengjia: { cn: '藤甲', type: 'equip', sub: 'armor', desc: '【南蛮入侵】、【万箭齐发】和普通【杀】对你无效；你每次受到火焰伤害时，该伤害+1。' },
+  baiyin: { cn: '白银狮子', type: 'equip', sub: 'armor', desc: '你每次受到大于1点的伤害时，防止多余的伤害；你失去装备区里的【白银狮子】时，回复1点体力。' },
 
   /* ===== 装备 / 坐骑 ===== */
   dilu: { cn: '的卢', type: 'equip', sub: 'horsePlus', desc: '+1马：其他角色到你的距离+1。' },
@@ -60,6 +69,8 @@ const CARD_META = {
   chitu: { cn: '赤兔', type: 'equip', sub: 'horseMinus', desc: '-1马：你到其他角色的距离-1。' },
   zixun: { cn: '紫骍', type: 'equip', sub: 'horseMinus', desc: '-1马：你到其他角色的距离-1。' },
   dayuan: { cn: '大宛', type: 'equip', sub: 'horseMinus', desc: '-1马：你到其他角色的距离-1。' },
+  hualiu: { cn: '骅骝', type: 'equip', sub: 'horsePlus', desc: '+1马：其他角色到你的距离+1。' },
+  huawei: { cn: '快航', type: 'equip', sub: 'horseMinus', desc: '-1马：你到其他角色的距离-1。' },
 };
 
 /** 牌堆构成：[名称, 花色, 点数, 数量] */
@@ -79,6 +90,13 @@ const DECK_SPEC = [
   ['peach', 'heart', 3, 1], ['peach', 'heart', 4, 1], ['peach', 'heart', 5, 1], ['peach', 'heart', 6, 1], ['peach', 'heart', 9, 1],
   ['peach', 'diamond', 2, 1], ['peach', 'diamond', 3, 1], ['peach', 'diamond', 4, 1], ['peach', 'diamond', 5, 1], ['peach', 'diamond', 12, 1],
   ['wine', 'spade', 3, 1], ['wine', 'spade', 9, 1], ['wine', 'club', 9, 1], ['wine', 'diamond', 9, 1], ['wine', 'diamond', 10, 1],
+  // 属性杀（火杀为红色、雷杀为黑色）
+  ['fire', 'heart', 4, 1], ['fire', 'heart', 7, 1], ['fire', 'diamond', 4, 1], ['fire', 'diamond', 5, 1],
+  ['thunder', 'spade', 6, 1], ['thunder', 'spade', 8, 1], ['thunder', 'club', 8, 1], ['thunder', 'club', 9, 1],
+  // 补充常用的闪 / 桃 / 酒
+  ['jink', 'heart', 12, 1], ['jink', 'heart', 13, 1], ['jink', 'diamond', 8, 1], ['jink', 'diamond', 13, 1],
+  ['peach', 'heart', 8, 1], ['peach', 'diamond', 13, 1],
+  ['wine', 'club', 3, 1], ['wine', 'heart', 6, 1],
 
   // 锦囊牌
   ['duel', 'spade', 1, 1], ['duel', 'club', 1, 1], ['duel', 'diamond', 1, 1],
@@ -92,8 +110,11 @@ const DECK_SPEC = [
   ['harvest', 'heart', 3, 1], ['harvest', 'heart', 4, 1],
   ['orchard', 'heart', 1, 1],
   ['borrow', 'club', 12, 1], ['borrow', 'club', 13, 1],
+  ['huogong', 'heart', 2, 1], ['huogong', 'heart', 3, 1], ['huogong', 'diamond', 12, 1], ['huogong', 'diamond', 6, 1],
   ['wuxie', 'spade', 11, 1], ['wuxie', 'club', 12, 1], ['wuxie', 'club', 13, 1], ['wuxie', 'diamond', 12, 1],
+  ['wuxie', 'heart', 11, 1], ['wuxie', 'diamond', 11, 1],
   ['lebu', 'spade', 6, 1], ['lebu', 'heart', 6, 1], ['lebu', 'club', 6, 1],
+  ['bingliang', 'club', 4, 1], ['bingliang', 'heart', 10, 1], ['bingliang', 'spade', 10, 1],
   ['lightning', 'spade', 1, 1], ['lightning', 'spade', 2, 1],
 
   // 装备牌
@@ -105,10 +126,15 @@ const DECK_SPEC = [
   ['zhangba', 'spade', 12, 1],
   ['fangtian', 'spade', 13, 1],
   ['qilin', 'heart', 5, 1],
+  ['hanbing', 'spade', 2, 1],
+  ['guding', 'club', 1, 1],
+  ['zhuque', 'diamond', 10, 1],
   ['bagua', 'spade', 2, 1], ['bagua', 'club', 2, 1],
   ['renwang', 'club', 2, 1],
-  ['dilu', 'club', 5, 1], ['jueying', 'spade', 5, 1], ['zhuahuang', 'heart', 13, 1],
-  ['chitu', 'heart', 5, 1], ['zixun', 'diamond', 13, 1], ['dayuan', 'spade', 13, 1],
+  ['tengjia', 'club', 2, 1], ['tengjia', 'spade', 2, 1],
+  ['baiyin', 'club', 12, 1],
+  ['dilu', 'club', 5, 1], ['jueying', 'spade', 5, 1], ['zhuahuang', 'heart', 13, 1], ['hualiu', 'diamond', 8, 1],
+  ['chitu', 'heart', 5, 1], ['zixun', 'diamond', 13, 1], ['dayuan', 'spade', 13, 1], ['huawei', 'heart', 9, 1],
 ];
 
 let uidSeq = 0;
@@ -135,6 +161,13 @@ function buildDeck() {
 
 const isRed = (card) => !!card && card.color === 'red';
 const isBlack = (card) => !!card && card.color === 'black';
+
+/** 是否属于【杀】家族（普通杀 / 火杀 / 雷杀） */
+const SLASH_FAMILY = { slash: 1, fire: 1, thunder: 1 };
+const isSlashCard = (name) => !!SLASH_FAMILY[name];
+
+/** 该牌作为【杀】使用时的属性：null=普通，'fire'=火焰，'thunder'=雷电 */
+const elementOf = (name) => CARD_META[name] ? (CARD_META[name].element || null) : null;
 const cardText = (card) => `${SUIT_CN[card.suit]}${NUM_CN[card.num] || card.num}${CARD_META[card.name].cn}`;
 
 const slotOf = (cardName) => CARD_META[cardName].sub;
@@ -159,4 +192,5 @@ function equipView(equip) {
 module.exports = {
   SUIT_CN, SUIT_NAME, NUM_CN, CARD_META, DECK_SPEC,
   buildDeck, makeCard, isRed, isBlack, cardText, cardView, equipView, slotOf,
+  isSlashCard, elementOf,
 };

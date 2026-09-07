@@ -60,8 +60,15 @@ function buildDom() {
   };
 
   // --- 尺寸桩：jsdom 无布局引擎，给出典型桌面牌桌尺寸 ---
-  Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return 900; } });
-  Object.defineProperty(w.HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return 460; } });
+  const W = 900, H = 460;
+  Object.defineProperty(w.HTMLElement.prototype, 'clientWidth', { configurable: true, get() { return W; } });
+  Object.defineProperty(w.HTMLElement.prototype, 'clientHeight', { configurable: true, get() { return H; } });
+  // 特效层需要用 getBoundingClientRect 计算并排位置，jsdom 默认返回全 0
+  w.HTMLElement.prototype.getBoundingClientRect = function () {
+    const w0 = this.id === 'fx-layer' ? W : W;
+    const h0 = this.id === 'fx-layer' ? H : H;
+    return { x: 0, y: 0, left: 0, top: 0, right: w0, bottom: h0, width: w0, height: h0, toJSON() { return this; } };
+  };
 
   // --- socket.io 桩：记录 emit，不真正连接 ---
   const emitted = [];
@@ -191,14 +198,14 @@ function fakeRoomPicking(clientId) {
   check(w.localStorage.getItem('sgs_muted') !== null, '静音状态已持久化到 localStorage');
 
   /* ---------- [3] 开始界面局域网地址 ---------- */
-  console.log('\n[3] 开始界面局域网地址');
-  for (let i = 0; i < 60 && !$('#net-list .net-item'); i++) await new Promise((r) => setTimeout(r, 50));
-  const netItems = $$('#net-list .net-item');
-  check(netItems.length === 2, `开始界面展示 ${netItems.length} 个访问地址`);
-  check(netItems.length > 0 && netItems.every((el) => /http:\/\/\d+\.\d+\.\d+\.\d+:\d+/.test(el.querySelector('.net-url').textContent.trim())),
-    '地址格式为 http://IP:端口，其他设备可直接打开');
-  check($$('#net-list [data-copy]').length === netItems.length, '每个地址都提供复制按钮');
-  check($$('#net-list .net-tag').length === netItems.length, '标注了「本机 / 局域网」');
+  console.log('\n[3] 开始界面（手机端适配）');
+  // 需求变更：开始界面已移除局域网地址模块，改由一键启动程序与房间页「复制邀请」提供
+  check(!$('#net-list'), '开始界面已不再显示局域网地址模块');
+  const cssHome = fs.readFileSync(path.join(PUBLIC, 'style.css'), 'utf8');
+  check(/#screen-home\{[^}]*overflow-y:auto/.test(cssHome), '首页可纵向滚动（内容超出一屏也不会被裁掉）');
+  check(/\.home-box\{[^}]*margin:auto/.test(cssHome), '首页用 margin:auto 居中（避免 flex 居中裁掉顶部）');
+  check(/@media \(max-width:640px\)\{[\s\S]*?#screen-home\{/.test(cssHome), '首页有专门的小屏适配规则');
+  check(/#screen-home\{[^}]*align-items:center/.test(cssHome) === false, '小屏下不再使用会截断内容的 flex 居中');
 
   /* ---------- [4] 选将界面技能说明 ---------- */
   console.log('\n[4] 选将界面技能说明');
@@ -493,6 +500,92 @@ function fakeRoomPicking(clientId) {
   await new Promise((r) => setTimeout(r, 300));
   check($('#tc-wait').classList.contains('urgent'), '倒计时不足时变为紧急样式');
 
+  /* ---------- [10] 询问期间常驻展示上一张牌 ---------- */
+  console.log('\n[10] 询问期间常驻展示上一张牌');
+  SGS.setGame(fakeGame(6));
+  await new Promise((r) => setTimeout(r, 20));
+  layer.innerHTML = '';
+  // A（玩家1）对 B（玩家3）使用顺手牵羊
+  SGS.handleFX({
+    type: 'play', seat: 0, as: 'snatch',
+    card: { uid: 'sn1', cn: '顺手牵羊', type: 'scroll', suit: 'club', num: 3, color: 'black' },
+    targets: [2],
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  check(!!layer.querySelector('.fx-card'), '出牌瞬间中央弹出该牌');
+
+  // 进入询问阶段：pendingPublic.kind = respond
+  const g10 = fakeGame(6);
+  g10.pendingPublic = {
+    seat: null, anonymous: true, kind: 'respond', as: 'wuxie', style: 'cards',
+    title: '询问是否有人使用【无懈可击】抵消【顺手牵羊】', timeoutAt: Date.now() + 20000, timeout: 25,
+  };
+  g10.pending = null;
+  SGS.setGame(g10);
+
+  // 关键：飞出动画还在时，不能再渲染一张常驻的同名牌，否则一屏出现两张一样的牌
+  await new Promise((r) => setTimeout(r, 60));
+  const during = (layer.querySelectorAll('.fx-card').length) + ($$('#tc-stage .pinned').length);
+  check(during === 1, `出牌动画期间同屏只有 1 张该牌（实际 ${during} 张，修复重复显示）`);
+
+  // 动画结束后，改为常驻展示，不再消失
+  await new Promise((r) => setTimeout(r, 2200));
+  const pinned = $('#tc-stage .pinned');
+  check(!!pinned, '动画结束后转为常驻展示（询问期间一直可见）');
+  check(!layer.querySelector('.fx-card'), '飞出动画已结束，不会与常驻牌并存');
+  check(pinned && pinned.textContent.indexOf('顺手牵羊') >= 0, '常驻展示的牌名正确（顺手牵羊）');
+  check(pinned && pinned.textContent.indexOf('玩家1') >= 0 && pinned.textContent.indexOf('玩家3') >= 0,
+    `常驻展示标注了出牌者与目标（${pinned && pinned.querySelector('.pinned-who').textContent.trim()}）`);
+
+  // 询问结束后应清除
+  const g10b = fakeGame(6);
+  g10b.pendingPublic = { seat: 1, anonymous: false, kind: 'turn', as: null, style: '', title: '出牌阶段', timeoutAt: Date.now() + 30000, timeout: 90 };
+  SGS.setGame(g10b);
+  await new Promise((r) => setTimeout(r, 300));
+  check(!$('#tc-stage .pinned'), '询问结束后常驻展示被清除');
+
+  /* ---------- [11] 五谷丰登公示 & 判定生效动画 ---------- */
+  console.log('\n[11] 五谷丰登公示与判定动画');
+  layer.innerHTML = '';
+  SGS.handleFX({
+    type: 'harvestReveal', seat: 0, hold: 1000,
+    cards: [
+      { uid: 'hv1', cn: '桃', type: 'basic', suit: 'heart', num: 5, color: 'red' },
+      { uid: 'hv2', cn: '杀', type: 'basic', suit: 'club', num: 7, color: 'black' },
+      { uid: 'hv3', cn: '青釭剑', type: 'equip', suit: 'spade', num: 6, color: 'black', sub: 'weapon' },
+    ],
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  const reveal = layer.querySelector('.fx-reveal');
+  check(!!reveal, '五谷丰登会先公示所有牌');
+  check(reveal && reveal.querySelectorAll('.card').length === 3, `公示了全部 3 张牌`);
+  check(reveal && reveal.textContent.indexOf('公示') >= 0, '标注为公示阶段');
+
+  layer.innerHTML = '';
+  SGS.handleFX({
+    type: 'judgeResult', seat: 2, name: '玩家3', reason: '乐不思蜀', effect: true,
+    text: '判定不为红桃，【乐不思蜀】生效，跳过出牌阶段',
+    card: { uid: 'jg1', cn: '杀', type: 'basic', suit: 'club', num: 7, color: 'black' },
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  const jr = layer.querySelector('.fx-judge-result');
+  check(!!jr, '判定结果有专门的动画');
+  check(jr && jr.classList.contains('on'), '判定生效使用醒目（红色）样式');
+  check(jr && jr.textContent.indexOf('判定生效') >= 0, '标注“判定生效”');
+  check(jr && jr.textContent.indexOf('乐不思蜀') >= 0 && jr.textContent.indexOf('玩家3') >= 0,
+    `说明了什么牌在谁身上判定（${jr && jr.querySelector('.jr-who').textContent.trim()}）`);
+
+  layer.innerHTML = '';
+  SGS.handleFX({
+    type: 'judgeResult', seat: 4, name: '玩家5', reason: '闪电', effect: false,
+    text: '判定不为黑桃2~9，【闪电】未生效，传给下家',
+    card: { uid: 'jg2', cn: '闪', type: 'basic', suit: 'heart', num: 2, color: 'red' },
+  });
+  await new Promise((r) => setTimeout(r, 30));
+  const jr2 = layer.querySelector('.fx-judge-result');
+  check(jr2 && jr2.classList.contains('off'), '判定失效使用另一套（绿色）样式');
+  check(jr2 && jr2.textContent.indexOf('判定失效') >= 0, '标注“判定失效”');
+
   /* ---------- [9] 倒计时上屏 & 匿名询问 ---------- */
   console.log('\n[9] 倒计时与匿名询问');
 
@@ -551,6 +644,83 @@ function fakeRoomPicking(clientId) {
   await new Promise((r) => setTimeout(r, 60));
   check($('#tc-wait .tw-who').textContent.trim() === '玩家4',
     `非匿名的操作仍显示行动者（${$('#tc-wait .tw-who').textContent.trim()}）`);
+
+  /* ---------- [12] 多个判定并列展示不重叠 ---------- */
+  console.log('\n[12] 多个判定并列展示');
+  SGS.setGame(fakeGame(6));
+  await new Promise((r) => setTimeout(r, 20));
+  layer.innerHTML = '';
+  const judgeOf = (seat, cn, suit) => ({
+    type: 'judgeResult', seat, name: `玩家${seat + 1}`, reason: cn, effect: true,
+    text: `${cn}判定生效`, card: { uid: `m${seat}`, cn, type: 'delayed', suit, num: 6, color: suit === 'heart' ? 'red' : 'black' },
+  });
+  SGS.handleFX(judgeOf(1, '乐不思蜀', 'club'));
+  SGS.handleFX(judgeOf(2, '兵粮寸断', 'heart'));
+  SGS.handleFX(judgeOf(3, '闪电', 'spade'));
+  await new Promise((r) => setTimeout(r, 60));
+  const judges = Array.from(layer.querySelectorAll('.fx-judge-result'));
+  check(judges.length === 3, `同时显示 3 个判定（${judges.length} 个）`);
+  const lefts = judges.map((el) => parseFloat(el.style.left));
+  check(new Set(lefts).size === 3, `三个判定的水平位置互不相同（${lefts.map((v) => v.toFixed(0)).join(' / ')}）`);
+  let minGap = Infinity;
+  for (let i = 0; i < lefts.length; i++) {
+    for (let j = i + 1; j < lefts.length; j++) minGap = Math.min(minGap, Math.abs(lefts[i] - lefts[j]));
+  }
+  check(minGap >= 120, `相邻判定的间距 ${minGap.toFixed(0)}px 足够，不会重叠`);
+  // 三个判定的内容都应可见
+  const jt = judges.map((el) => el.querySelector('.jr-who').textContent.trim());
+  check(jt.every((t) => t.indexOf('在') >= 0 && /玩家\d/.test(t)), '每个判定都标注了是谁的什么判定');
+  console.log('   ' + jt.join(' | '));
+
+  // 多个出牌动画同样应并排
+  layer.innerHTML = '';
+  for (let i = 0; i < 3; i++) {
+    SGS.handleFX({
+      type: 'play', seat: i, as: 'slash',
+      card: { uid: `p${i}`, cn: '杀', type: 'basic', suit: 'club', num: 7, color: 'black' },
+      targets: [i + 1],
+    });
+  }
+  await new Promise((r) => setTimeout(r, 60));
+  const plays = Array.from(layer.querySelectorAll('.fx-card'));
+  const playLefts = plays.map((el) => parseFloat(el.style.left));
+  check(plays.length === 3 && new Set(playLefts).size === 3,
+    '同时出现的多张出牌动画也会横向排开（不重叠）');
+
+  // 连续快速出牌时不能越堆越多：同组最多保留 3 张
+  layer.innerHTML = '';
+  for (let i = 0; i < 8; i++) {
+    SGS.handleFX({
+      type: 'play', seat: i % 6, as: 'slash',
+      card: { uid: `q${i}`, cn: '杀', type: 'basic', suit: 'club', num: 7, color: 'black' },
+      targets: [],
+    });
+    await new Promise((r) => setTimeout(r, 10));
+  }
+  const many = Array.from(layer.querySelectorAll('.fx-card'));
+  check(many.length <= 3, `连续出 8 张牌后同屏最多只保留 ${many.length} 张（不会堆成一排）`);
+  // 保留的应是最新的几张
+  const keptUids = many.map((el) => el.querySelector('.card') && el.querySelector('.card').dataset.uid);
+  check(keptUids.indexOf('q7') >= 0 && keptUids.indexOf('q0') < 0,
+    '超出上限时移除的是最早的牌，保留最新的');
+
+  // 判定组与出牌组不能挤在一起：两组垂直位置明显分开
+  layer.innerHTML = '';
+  SGS.handleFX(judgeOf(1, '乐不思蜀', 'club'));
+  SGS.handleFX({
+    type: 'play', seat: 0, as: 'slash',
+    card: { uid: 'mix1', cn: '杀', type: 'basic', suit: 'club', num: 7, color: 'black' },
+    targets: [],
+  });
+  await new Promise((r) => setTimeout(r, 60));
+  const jEl = layer.querySelector('.fx-judge-result');
+  const cEl = layer.querySelector('.fx-card');
+  if (jEl && cEl) {
+    const dy = Math.abs(parseFloat(jEl.style.top) - parseFloat(cEl.style.top));
+    check(dy >= 100, `判定卡与出牌卡垂直相距 ${dy.toFixed(0)}px，不会挤在一起`);
+  } else {
+    check(false, '判定卡与出牌卡应同时存在以便校验垂直间距');
+  }
 
   report();
 
