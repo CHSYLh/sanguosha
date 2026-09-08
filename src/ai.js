@@ -95,6 +95,18 @@ function wantSkill(G, p, sid) {
       return p.hp < p.maxHp && p.hand.length >= 2;
     case 'qingnang':
       return p.hand.length >= 2 && G.alive().some((x) => x.hp < x.maxHp && enemyScore(G, p, x) < 0);
+    // 拼点类：手牌充裕时才赌，避免白白损失关键牌并被禁用出杀
+    case 'tianyi':
+    case 'qiaoshui':
+    case 'xianzhen':
+      return p.hand.length >= 3;
+    case 'quhu':
+      return p.hp >= 2 && p.hand.length >= 2;
+    // 强袭：血量吃紧且没有武器可弃时不发动，避免自杀
+    case 'qiangxi':
+      return p.hp > 2 || !!p.equip.weapon;
+    case 'mingce':
+      return p.hand.length >= 2;
     default:
       return true;
   }
@@ -292,6 +304,11 @@ function shouldPlayCard(G, p, as, ctx) {
     const lord = G.players[ctx.forSeat];
     return !!lord && enemyScore(G, p, lord) < 0;
   }
+  // 【挑衅】：对方是敌人就出杀，是队友则宁可丢一张牌也不打自己人
+  if (reason === 'tiaoxin') {
+    const init = G.players[ctx.initiator];
+    return !!init && enemyScore(G, p, init) > 0;
+  }
   return true;
 }
 
@@ -381,7 +398,33 @@ function decideChoose(G, p, req) {
       return { ids: [ch[0].id] };
     }
 
-    case 'guicai': {
+    // 拼点：出点数最大的牌
+    case 'pindian':
+      return { ids: [cards.slice().sort((a, b) => (b.card.num === 1 ? 14 : b.card.num) - (a.card.num === 1 ? 14 : a.card.num))[0].id] };
+
+    case 'qiangxiMode': {
+      const w = ch.find((c) => c.id === 'weapon');
+      return { ids: [(w || ch[0]).id] };
+    }
+
+    // 用技能替代摸牌阶段时需要克制：
+    // 若全场长期不摸牌，手牌会枯竭导致牌局僵持（实测 4 张辽能打到 140 轮仍分不出胜负）
+    case 'tuxi': {
+      // 同时满足「自己缺牌」与「至少能偷满两张」才发动，
+      // 否则会与正常摸牌交替进行，避免出现全场都不摸牌的僵局
+      const cands = G.alive().filter((x) => x !== p && x.hand.length);
+      return { ids: [p.hand.length <= 1 && cands.length >= 2 ? 'yes' : 'no'] };
+    }
+
+    case 'shensu':
+      // 手上牌还够用才值得跳过摸牌换一次免费【杀】
+      return { ids: [p.hand.length >= 3 ? 'yes' : 'no'] };
+
+    case 'zaiqi':
+      return { ids: [p.hp <= 2 ? 'yes' : 'no'] };
+
+    case 'guicai':
+    case 'guidao': {
       const tgt = G.players[req.judgeFor];
       if (!tgt) return { ids: [] };
       if (tgt !== p && enemyScore(G, p, tgt) > 0) return { ids: [] };

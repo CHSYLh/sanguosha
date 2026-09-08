@@ -151,6 +151,11 @@ class Game {
     let d = Math.min(Math.abs(ia - ib), n - Math.abs(ia - ib));
     if (b.equip.horsePlus) d += 1;
     if (a.equip.horseMinus) d -= 1;
+    // 技能距离修正（马术 -1、义从 依体力值浮动）
+    for (const sid of a.skillIds) {
+      const sk = SKILLS[sid];
+      if (sk && sk.modifyDistance) d += sk.modifyDistance(this, a) || 0;
+    }
     return Math.max(1, d);
   }
 
@@ -164,18 +169,25 @@ class Game {
   slashLimit(p) {
     if (p.skillIds.includes('paoxiao')) return Infinity;
     if (p.equip.weapon && p.equip.weapon.name === 'crossbow') return Infinity;
+    // 【天义】【巧说】拼点获胜：本回合【杀】无次数限制
+    if (p.turnFlags.tianyi) return Infinity;
     return 1;
   }
 
   hasSkill(p, id) { return !!p && p.skillIds.includes(id); }
 
-  canBeTarget(t, cardName, source) {
+  /** canBeTarget 的可选第 4 参数 card：部分技能（如【帷幕】）需要依据实际牌的花色判断 */
+  canBeTarget(t, cardName, source, card = null) {
     if (!t || t.dead || t === source) return false;
     if (this.hasSkill(t, 'qianxun') && (cardName === 'snatch' || cardName === 'lebu')) return false;
     if (this.hasSkill(t, 'kongcheng') && t.hand.length === 0 && (cardName === 'slash' || cardName === 'duel')) return false;
+    // 【帷幕】：不能成为黑色锦囊牌的目标
+    if (this.hasSkill(t, 'weimu') && CARD_META[cardName] && CARD_META[cardName].type === 'scroll'
+      && card && card.color === 'black') return false;
     if (cardName === 'borrow' && !t.equip.weapon) return false;
-    if (cardName === 'lebu' && t.judge.some((j) => j.name === 'lebu')) return false;
-    if (cardName === 'bingliang' && t.judge.some((j) => j.name === 'bingliang')) return false;
+    // 判定区里可能是被【断粮】【国色】当作延时锦囊使用的其它牌，按“当作”的牌名判断
+    if (cardName === 'lebu' && t.judge.some((j) => (j.__as || j.name) === 'lebu')) return false;
+    if (cardName === 'bingliang' && t.judge.some((j) => (j.__as || j.name) === 'bingliang')) return false;
     // 【火攻】需要目标有手牌可展示
     if (cardName === 'huogong' && t.hand.length === 0) return false;
     return true;
@@ -200,7 +212,18 @@ class Game {
       this.drawPile.splice(inDeck, 1);
     }
     card.__inDiscard = true;
+    card.__as = null;   // 进入弃牌堆后恢复为原本的牌（不再“当作”其它牌）
     this.discardPile.push(card);
+  }
+
+  /** 从弃牌堆取回一张牌（【落英】等），取回后该牌不再处于弃牌堆中 */
+  takeFromDiscard(card) {
+    if (!card) return null;
+    const i = this.discardPile.indexOf(card);
+    if (i < 0) return null;
+    this.discardPile.splice(i, 1);
+    card.__inDiscard = false;
+    return card;
   }
 
   drawCards(p, n) {
@@ -240,12 +263,24 @@ class Game {
     return removed;
   }
 
+  /**
+   * 手牌离开手牌区的唯一推荐入口：移除 + 触发「失去手牌」类技能（陆逊【连营】等）。
+   * 之前各条出牌路线各自触发，装备牌 / 锦囊牌 / 救人用【桃】等分支被遗漏，
+   * 导致陆逊用掉最后一张非基本牌时【连营】不触发。统一在此触发可避免再漏。
+   */
+  async takeFromHand(p, cards, opts = {}) {
+    const removed = this.removeFromHand(p, cards);
+    if (removed.length && !this.over) await this.trigger('cardLose', p, { cards: removed, ...opts });
+    return removed;
+  }
+
   async discardFromHand(p, cards) {
     const removed = this.removeFromHand(p, cards);
     for (const c of removed) this.discardCard(c);
     if (removed.length) {
       this.emitFX({ type: 'discard', seat: p.seat, count: removed.length, from: 'hand' });
       await this.trigger('cardLose', p, { cards: removed });
+      await this.triggerAll('onDiscard', { cards: removed, fromSeat: p.seat });
     }
     return removed;
   }
@@ -323,6 +358,37 @@ class Game {
     }
   }
 
+  /**
+   * 与 trigger 类似，但返回第一个「真值」结果，用于「伤害转移」这类
+   * 由技能完全接管后续结算的钩子（返回真值表示已处理，调用方应中止原流程）。
+   */
+  async triggerValue(hook, p, ctx = {}) {
+    if (this.over || !p || !p.hero) return null;
+    for (const sid of p.skillIds) {
+      if (SKILL_META[sid] && SKILL_META[sid].type === 'lord' && p.role !== 'lord') continue;
+      const sk = SKILLS[sid];
+      if (!sk || !sk[hook]) continue;
+      const r = await sk[hook](this, p, ctx);
+      if (r) return r;
+      if (this.over) return null;
+    }
+    return null;
+  }
+
+  /** 向全场所有角色广播式触发（用于「别人的牌进弃牌堆」这类技能，如【落英】） */
+  async triggerAll(hook, ctx = {}) {
+    for (const p of this.players) {
+      if (this.over) return;
+      if (p.dead || !p.hero) continue;
+      for (const sid of p.skillIds) {
+        const sk = SKILLS[sid];
+        if (!sk || !sk[hook]) continue;
+        await sk[hook](this, p, ctx);
+        if (this.over) return;
+      }
+    }
+  }
+
   /** 卡牌可被当作哪些牌使用 */
   convertNames(p, card, ctx) {
     if (!p || !p.hero) return [];
@@ -352,8 +418,13 @@ class Game {
   /** 某玩家在当前情境下可用于响应（打出）的牌 */
   cardOptions(p, kind, ctx = {}) {
     const out = [];
-    if (kind === 'jink' && !ctx.noArmor && p.equip.armor && p.equip.armor.name === 'bagua' && !ctx.noBagua) {
-      out.push({ id: 'bagua', as: 'jink', label: '发动【八卦阵】判定', skill: 'bagua' });
+    if (kind === 'jink' && !ctx.noArmor && !ctx.noBagua) {
+      if (p.equip.armor && p.equip.armor.name === 'bagua') {
+        out.push({ id: 'bagua', as: 'jink', label: '发动【八卦阵】判定', skill: 'bagua' });
+      } else if (!p.equip.armor && this.hasSkill(p, 'bazhen')) {
+        // 【八阵】：未装备防具时视为装备着【八卦阵】
+        out.push({ id: 'bagua', as: 'jink', label: '发动【八阵】判定', skill: 'bazhen' });
+      }
     }
     for (const c of p.hand) {
       const names = this.convertNames(p, c, kind);
@@ -447,13 +518,21 @@ class Game {
     if (!choices || !choices.length) return null;
     const ans = await this.request(seat, { kind: 'choose', style, prompt, choices, min, max, optional, purpose, ...extra });
     if (!ans || !ans.ids || !ans.ids.length) return optional ? [] : null;
-    return ans.ids;
+    // 只接受本次候选项之内的答案，避免异常/过期应答污染后续结算
+    const valid = new Set(choices.map((c) => String(c.id)));
+    const picked = ans.ids.map((id) => String(id)).filter((id) => valid.has(id));
+    if (!picked.length) return optional ? [] : null;
+    return picked;
   }
 
   async choosePlayer(seat, { prompt, candidates, optional = false, purpose = '' }) {
     const choices = candidates.map((s) => ({ id: String(s), label: this.players[s].name, seat: s }));
     const ids = await this.choose(seat, { prompt, choices, min: 1, max: 1, optional, style: 'players', purpose });
-    return ids && ids.length ? Number(ids[0]) : null;
+    if (!ids || !ids.length) return null;
+    const s = Number(ids[0]);
+    // 必须是合法的存活座位号，否则视为放弃（防止异常答案被当成座位使用）
+    if (!Number.isInteger(s) || !this.players[s] || this.players[s].dead) return null;
+    return s;
   }
 
   async askYesNo(seat, prompt, { yesLabel = '发动', noLabel = '不发动', purpose = '' } = {}) {
@@ -506,6 +585,7 @@ class Game {
         : `${p.name} 将 ${cardText(card)} 当作【${CARD_META[kind].cn}】打出`);
       this.emitFX({ type: 'respond', seat: p.seat, as: kind, card: cardView(card), convert: !native });
       await this.trigger('cardLose', p, { cards: [card] });
+      await this.trigger('responded', p, { kind, card });
       return { card };
     }
     return await this.lordAssist(p, kind, ctx);
@@ -545,7 +625,9 @@ class Game {
   }
 
   async askJink(target, source, slashCard, opts = {}) {
-    const qinggang = source && source.equip.weapon && source.equip.weapon.name === 'qinggang';
+    // 青釭剑 与【陷阵】都可无视目标防具
+    const qinggang = (source && source.equip.weapon && source.equip.weapon.name === 'qinggang')
+      || (source && source.turnFlags && source.turnFlags.xianzhenSeat === target.seat);
     if (!qinggang && target.equip.armor && target.equip.armor.name === 'renwang' && slashCard && isBlack(slashCard)) {
       this.log(`【仁王盾】生效，黑色【杀】对 ${target.name} 无效`);
       return true;
@@ -555,6 +637,12 @@ class Game {
       && slashCard && this.slashElement(source, slashCard) === null) {
       this.log(`【藤甲】生效，${target.name} 免疫普通【杀】`);
       this.emitFX({ type: 'armorEffect', seat: target.seat, armor: 'tengjia', blocked: true });
+      return true;
+    }
+    // 【毅重】：未装备防具时，黑色【杀】对你无效（青釭剑可无视）
+    if (!qinggang && !target.equip.armor && this.hasSkill(target, 'yizhong') && slashCard && isBlack(slashCard)) {
+      this.log(`【毅重】生效，黑色【杀】对 ${target.name} 无效`);
+      this.emitFX({ type: 'armorEffect', seat: target.seat, armor: 'yizhong', blocked: true });
       return true;
     }
     const need = opts.needTwo ? 2 : 1;
@@ -665,31 +753,67 @@ class Game {
     }
   }
 
+  /** 判定牌生效前，允许发动的改判技能：【鬼才】任意手牌，【鬼道】仅限黑色手牌 */
   async askJudgeModify(p, card, reason) {
     for (const sp of this.orderFrom(p)) {
-      if (this.over || sp.dead || !sp.skillIds.includes('guicai')) continue;
-      const choices = sp.hand.map((c) => ({ id: c.uid, label: cardText(c), card: cardView(c) }));
+      if (this.over || sp.dead) continue;
+      const sid = ['guicai', 'guidao'].find((s) => sp.skillIds.includes(s));
+      if (!sid) continue;
+      // 【鬼道】：只能用黑色手牌替换
+      const pool = sid === 'guidao' ? sp.hand.filter((c) => isBlack(c)) : sp.hand;
+      const choices = pool.map((c) => ({ id: c.uid, label: cardText(c), card: cardView(c) }));
       if (!choices.length) continue;
       const ids = await this.choose(sp.seat, {
-        prompt: `【鬼才】是否打出一张手牌替换 ${p.name} 的【${reason}】判定牌（${cardText(card)}）？`,
-        choices, min: 1, max: 1, optional: true, style: 'cards', purpose: 'guicai',
+        prompt: `【${SKILL_META[sid].cn}】是否打出一张手牌替换 ${p.name} 的【${reason}】判定牌（${cardText(card)}）？`,
+        choices, min: 1, max: 1, optional: true, style: 'cards', purpose: sid,
         extra: { judgeFor: p.seat, judgeReason: reason, currentCard: cardView(card) },
       });
       if (!ids || !ids.length) continue;
-      const c = sp.hand.find((x) => x.uid === ids[0]);
+      const c = pool.find((x) => x.uid === ids[0]);
       if (!c) continue;
-      this.removeFromHand(sp, [c]);
-      this.log(`${sp.name} 发动【鬼才】，打出 ${cardText(c)} 替换判定牌`);
-      await this.trigger('cardLose', sp, { cards: [c] });
+      await this.takeFromHand(sp, [c]);
+      this.log(`${sp.name} 发动【${SKILL_META[sid].cn}】，打出 ${cardText(c)} 替换判定牌`);
       return c;
     }
     return null;
+  }
+
+  /* ==================== 拼点 ==================== */
+  /**
+   * 拼点：a 与 b 各暗置一张手牌后同时亮出，比较点数（A=1 … K=13）。
+   * 返回 1 表示 a 胜、-1 表示 b 胜、0 表示平（按规则视为发起方 a 未获胜）。
+   */
+  async pinDian(a, b) {
+    if (!a || !b || a.dead || b.dead) return 0;
+    if (!a.hand.length || !b.hand.length) return 0;
+    const promptA = `【拼点】与 ${b.name} 拼点，选择一张手牌`;
+    const promptB = `【拼点】与 ${a.name} 拼点，选择一张手牌`;
+    const mk = (p) => p.hand.map((c) => ({ id: c.uid, label: cardText(c), card: cardView(c) }));
+    // 注意：引擎同一时刻只能挂起一个请求（this.pending 为单槽），必须先后询问
+    const ia = await this.choose(a.seat, { prompt: promptA, choices: mk(a), min: 1, max: 1, style: 'cards', purpose: 'pindian' });
+    const ca = ia && ia.length ? a.hand.find((c) => c.uid === ia[0]) : a.hand[0];
+    if (!ca) return 0;
+    const ib = await this.choose(b.seat, { prompt: promptB, choices: mk(b), min: 1, max: 1, style: 'cards', purpose: 'pindian' });
+    const cb = ib && ib.length ? b.hand.find((c) => c.uid === ib[0]) : null;
+    if (!cb) return 0;
+    this.log(`【拼点】${a.name} ${cardText(ca)} vs ${b.name} ${cardText(cb)}`);
+    this.emitFX({ type: 'showCard', seat: a.seat, card: cardView(ca), reason: '拼点' });
+    this.emitFX({ type: 'showCard', seat: b.seat, card: cardView(cb), reason: '拼点' });
+    await this.discardFromHand(a, [ca]);
+    await this.discardFromHand(b, [cb]);
+    // 点数：A=1、J=11、Q=12、K=13
+    if (ca.num > cb.num) return 1;
+    if (ca.num < cb.num) return -1;
+    return 0;
   }
 
   /* ==================== 伤害 / 濒死 / 死亡 ==================== */
   async applyDamage({ source = null, target, amount = 1, card = null, reason = '', element = null }) {
     if (this.over || !target || target.dead) return 0;
     const src = source && !source.dead ? source : null;
+    // 【天香】等“转移伤害”类技能：返回真值表示已由技能接管本次结算
+    if (await this.triggerValue('beforeDamage', target, { source: src, amount, card, reason, element })) return 0;
+    if (this.over || target.dead) return 0;
     // 【白银狮子】：每次受到大于1点的伤害时，防止多余的伤害
     if (target.equip.armor && target.equip.armor.name === 'baiyin' && amount > 1) {
       this.log(`【白银狮子】防止了 ${amount - 1} 点伤害`);
@@ -715,8 +839,17 @@ class Game {
     this.broadcast();
     await this.trigger('damaged', target, { source: src, amount, card, reason });
     if (this.over) return amount;
+    // 【狂骨】【烈刃】等“造成伤害后”触发的技能
+    if (src && !src.dead) await this.trigger('dealtDamage', src, { target, amount, card, reason });
+    if (this.over) return amount;
     if (target.hp <= 0) await this.resolveDying(target, src);
     return amount;
+  }
+
+  /** 当前回合角色拥有【完杀】时返回其座位，否则返回 -1 */
+  wanshaSeat() {
+    const cur = this.players[this.currentSeat];
+    return cur && !cur.dead && this.hasSkill(cur, 'wansha') ? cur.seat : -1;
   }
 
   async resolveDying(target, source) {
@@ -728,6 +861,8 @@ class Game {
       for (const p of this.orderFrom(target)) {
         if (this.over || target.dead) break;
         if (p.dead) continue;
+        // 【完杀】：贾诩的回合内，除其与濒死角色本人外，其他角色不能使用【桃】
+        if (this.wanshaSeat() >= 0 && p.seat !== this.wanshaSeat() && p !== target) continue;
         const choices = this.cardOptions(p, 'peach', { dying: true, target });
         if (!choices.length) continue;
         const id = await this.respond(p.seat, 'peach', {
@@ -737,7 +872,7 @@ class Game {
         if (!id) continue;
         const card = p.hand.find((c) => c.uid === id);
         if (!card) continue;
-        this.removeFromHand(p, [card]);
+        await this.takeFromHand(p, [card]);
         this.discardCard(card);
         let heal = 1;
         if (target.role === 'lord' && target.skillIds.includes('jiuyuan') && p !== target && p.hero.country === 'wu') heal = 2;
@@ -833,12 +968,15 @@ class Game {
       const idx = p.judge.indexOf(jc);
       if (idx >= 0) p.judge.splice(idx, 1);
       const owner = this.players[jc.ownerSeat] || p;
-      if (await this.askWuxie(jc.name, owner.seat, p.seat, jc)) {
-        this.log(`【${CARD_META[jc.name].cn}】被【无懈可击】抵消并弃置`);
+      // 可能是被【断粮】【国色】当作延时锦囊使用的其它牌，按“当作”的牌名结算
+      const jcName = jc.__as || jc.name;
+      const jcCn = CARD_META[jcName].cn;
+      if (await this.askWuxie(jcName, owner.seat, p.seat, jc)) {
+        this.log(`【${jcCn}】被【无懈可击】抵消并弃置`);
         this.discardCard(jc);
         continue;
       }
-      if (jc.name === 'lebu') {
+      if (jcName === 'lebu') {
         const c = await this.judgeCard(p, '乐不思蜀');
         if (c.suit === 'heart') {
           this.log('判定为红桃，【乐不思蜀】失效');
@@ -847,7 +985,7 @@ class Game {
           p.turnFlags.skipPlay = true;
         }
         this.discardCard(jc);
-      } else if (jc.name === 'bingliang') {
+      } else if (jcName === 'bingliang') {
         const c = await this.judgeCard(p, '兵粮寸断');
         if (c.suit === 'club') {
           this.log('判定为梅花，【兵粮寸断】失效');
@@ -856,7 +994,7 @@ class Game {
           p.turnFlags.skipDraw = true;
         }
         this.discardCard(jc);
-      } else if (jc.name === 'lightning') {
+      } else if (jcName === 'lightning') {
         const c = await this.judgeCard(p, '闪电');
         const hit = c.suit === 'spade' && c.num >= 2 && c.num <= 9;
         if (hit) {
@@ -883,6 +1021,16 @@ class Game {
     if (p.turnFlags.skipDraw) {
       this.log(`${p.name} 因【兵粮寸断】跳过摸牌阶段`);
       return;
+    }
+    if (p.__skipNextDraw) {
+      p.__skipNextDraw = false;
+      this.log(`${p.name} 因【据守】跳过摸牌阶段`);
+      return;
+    }
+    // 【突袭】【神速】等“用技能替代摸牌阶段”的技能
+    for (const sid of p.skillIds) {
+      const sk = SKILLS[sid];
+      if (sk && sk.insteadDraw && await sk.insteadDraw(this, p)) return;
     }
     for (const sid of p.skillIds) {
       const sk = SKILLS[sid];
@@ -955,9 +1103,13 @@ class Game {
     const acts = [];
     if (p.dead || this.over) return acts;
     const limit = this.slashLimit(p);
-    const canSlash = p.turnFlags.slashUsed < limit;
+    // 【天义】【陷阵】【巧说】拼点失败：本回合不能使用【杀】
+    const canSlash = p.turnFlags.slashUsed < limit && !p.turnFlags.noSlash;
     const others = this.alive().filter((x) => x !== p);
-    const reach = others.filter((t) => this.canReach(p, t));
+    // 【陷阵】对指定目标无视距离，【巧说】本回合无距离限制
+    const reach = others.filter((t) => this.canReach(p, t)
+      || p.turnFlags.noRangeLimit
+      || p.turnFlags.xianzhenSeat === t.seat);
 
     for (const c of p.hand) {
       for (const as of this.convertNames(p, c, 'play')) {
@@ -968,7 +1120,9 @@ class Game {
           const tg = reach.filter((t) => this.canBeTarget(t, 'slash', p)).map((t) => t.seat);
           if (!tg.length) continue;
           const isLast = p.hand.length === 1;
-          const max = (p.equip.weapon && p.equip.weapon.name === 'fangtian' && isLast) ? Math.min(3, tg.length) : 1;
+          let max = (p.equip.weapon && p.equip.weapon.name === 'fangtian' && isLast) ? Math.min(3, tg.length) : 1;
+          // 【天义】获胜后可额外指定一个目标
+          if (p.turnFlags.tianyi) max = Math.min(2, tg.length);
           acts.push({ type: 'card', as, cardId: c.uid, targets: tg, min: 1, max, need: 1 });
         } else if (meta.type === 'equip') {
           acts.push({ type: 'card', as, cardId: c.uid, targets: [], min: 0, max: 0, need: 1 });
@@ -990,7 +1144,8 @@ class Game {
         } else if (meta.mode === 'all') {
           acts.push({ type: 'card', as, cardId: c.uid, targets: [], min: 0, max: 0, need: 1 });
         } else if (meta.mode === 'enemy') {
-          let tg = others.filter((t) => this.canBeTarget(t, as, p));
+          // 传入实际卡牌，供【帷幕】等按花色判断的技能使用
+          let tg = others.filter((t) => this.canBeTarget(t, as, p, c));
           if (meta.range === 1 && !p.skillIds.includes('qicai')) tg = tg.filter((t) => this.distance(p, t) <= 1);
           if (as === 'borrow') {
             tg = tg.filter((t) => this.alive().some((b) => b !== t && this.attackRange(t) >= this.distance(t, b) && this.canBeTarget(b, 'slash', t)));
@@ -1083,7 +1238,6 @@ class Game {
     }
     const need = act.need || 1;
     if (cards.length < need) return;
-    this.removeFromHand(p, cards);
     const targets = (act.targets || []).map((s) => this.players[s]).filter((t) => t && !t.dead);
     const main = cards[0];
     this.log(`${p.name} 使用【${meta.cn}】${cards.length > 1 ? `（${cards.map(cardText).join('+')}）` : ` ${cardText(main)}`}${targets.length ? ` → ${targets.map((t) => t.name).join('、')}` : ''}`);
@@ -1092,6 +1246,8 @@ class Game {
       extra: cards.slice(1).map(cardView),
       targets: targets.map((t) => t.seat),
     });
+    // 牌已离手：无论基本牌 / 锦囊 / 装备 / 延时锦囊，都要触发【连营】这类技能
+    await this.takeFromHand(p, cards);
     this.broadcast();
 
     if (meta.type === 'scroll' || meta.type === 'delayed') {
@@ -1110,6 +1266,9 @@ class Game {
         return;
       }
       main.ownerSeat = p.seat;
+      // 【断粮】【国色】等会把其它牌当作延时锦囊使用，这里记录其“当作”的牌名，
+      // 否则判定阶段认不出这张牌，它会被移出判定区却永远不进弃牌堆（牌凭空消失）
+      if (act.as !== main.name) main.__as = act.as;
       tgt.judge.push(main);
       this.log(`【${meta.cn}】置入 ${tgt.name} 的判定区`);
       for (const c of cards.slice(1)) this.discardCard(c);
@@ -1151,8 +1310,22 @@ class Game {
             this.emitFX({ type: 'armorEffect', seat: t.seat, armor: 'tengjia', blocked: true });
             continue;
           }
+          // 【祸首】【巨象】：免疫【南蛮入侵】
+          if (this.hasSkill(t, 'huoshou') || this.hasSkill(t, 'juxiang')) {
+            const cn = this.hasSkill(t, 'huoshou') ? '祸首' : '巨象';
+            this.log(`【${cn}】生效，${t.name} 免疫【南蛮入侵】`);
+            continue;
+          }
           const res = await this.askCard(t.seat, 'slash', { reason: 'invasion', purpose: 'invasion', initiator: p.seat });
           if (!res) await this.applyDamage({ source: p, target: t, amount: 1, card: main, reason: '南蛮入侵' });
+        }
+        // 【巨象】：【南蛮入侵】结算结束后，祝融获得之
+        if (!this.over) {
+          const zr = this.alive().find((x) => this.hasSkill(x, 'juxiang'));
+          if (zr && !this.inPossession(main)) {
+            zr.hand.push(main);
+            this.log(`${zr.name} 发动【巨象】，获得【南蛮入侵】`);
+          }
         }
         break;
       case 'arrows':
@@ -1196,9 +1369,9 @@ class Game {
     }
 
     // 只把确实无主的牌放入弃牌堆（被【奸雄】等技能获得的牌仍在他人手中）
+    // 只把确实无主的牌放入弃牌堆（被【奸雄】等技能获得的牌仍在他人手中）
     for (const c of cards) if (!this.inPossession(c)) this.discardCard(c);
     if (meta.type === 'scroll') await this.trigger('usedScroll', p, { card: main });
-    if (meta.type === 'basic') await this.trigger('cardLose', p, { cards });
   }
 
   async useSlash(p, targets, mainCard, opts = {}) {
@@ -1245,6 +1418,13 @@ class Game {
         }
       }
 
+      // 【烈弓】：目标手牌数不少于你、或体力值不高于你时，该【杀】不可被【闪】响应
+      if (!mustHit && p.skillIds.includes('liegong')
+        && (t.hand.length >= p.hand.length || t.hp <= p.hp)) {
+        mustHit = true;
+        this.log(`【烈弓】生效，${t.name} 的手牌数/体力值满足条件，无法使用【闪】响应此【杀】`);
+      }
+
       let evaded = false;
       if (!mustHit) evaded = await this.askJink(t, p, mainCard, { needTwo: wushuang });
 
@@ -1274,7 +1454,7 @@ class Game {
               const id = await this.respond(p.seat, 'slash', { choices: opts2, prompt: '选择要使用的【杀】', purpose: 'qinglong', target: t.seat });
               const c = id ? p.hand.find((x) => x.uid === id) : null;
               if (c) {
-                this.removeFromHand(p, [c]);
+                await this.takeFromHand(p, [c]);
                 this.emitFX({ type: 'play', seat: p.seat, as: 'slash', card: cardView(c), targets: [t.seat], weapon: 'qinglong' });
                 await this.useSlash(p, [t], c, { free: true });
                 if (!this.inPossession(c)) this.discardCard(c);
@@ -1285,6 +1465,8 @@ class Game {
             }
           }
         }
+        // 【猛进】【骁果】：【杀】被【闪】抵消后触发
+        if (evaded) await this.trigger('slashDodged', p, { target: t, card: mainCard });
       }
 
       if (!evaded && !t.dead) {
@@ -1440,7 +1622,7 @@ class Game {
       const c = target.equip[slot];
       if (c) choices.push({ id: `eq:${slot}`, label: `装备·${CARD_META[c.name].cn}`, card: cardView(c) });
     }
-    for (const j of target.judge) choices.push({ id: `jd:${j.uid}`, label: `判定·${CARD_META[j.name].cn}`, card: cardView(j) });
+    for (const j of target.judge) choices.push({ id: `jd:${j.uid}`, label: `判定·${CARD_META[j.__as || j.name].cn}`, card: cardView(j) });
     if (!choices.length) return;
     const ids = await this.choose(p.seat, {
       prompt: isSnatch ? '【顺手牵羊】选择要获得的牌' : '【过河拆桥】选择要弃置的牌',

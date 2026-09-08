@@ -9,7 +9,9 @@ const http = require('http');
 const URL = process.env.URL || 'http://localhost:3000';
 const HUMANS = parseInt(process.env.HUMANS || '2', 10);
 const AIS = parseInt(process.env.AIS || '2', 10);
-const TIMEOUT = 240000;
+// 默认预算随人数增加：人机每次决策都有固定思考耗时（默认 900ms），人数越多耗时越长。
+// 想让联机测试跑得快一些，可用 SGS_AI_DELAY=100 启动服务，或直接用 E2E_TIMEOUT 覆盖。
+const TIMEOUT = parseInt(process.env.E2E_TIMEOUT || String(120000 + (HUMANS + AIS) * 60000), 10);
 
 const errors = [];
 const clients = [];

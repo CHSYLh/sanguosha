@@ -12,7 +12,8 @@
     "test:fx": "node tools/test-fx.js",
     "test:ui": "node tools/test-ui.js",
     "test:cards": "node tools/test-cards.js",
-    "test:rules": "node tools/test-rules.js"
+    "test:rules": "node tools/test-rules.js",
+    "test:heroes": "node tools/test-heroes.js"
   },
   "keywords": [
     "sanguosha",

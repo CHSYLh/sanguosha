@@ -2,7 +2,7 @@
  * 房间管理：开房 / 加人 / 添加人机 / 选将 / 开局
  */
 const { Game } = require('./engine');
-const { HEROES, HERO_MAP, SKILL_META, pickRandomHeroes } = require('./heroes');
+const { HEROES, HERO_MAP, SKILL_META, dealHeroOptions } = require('./heroes');
 const { ROLE_CONFIG, roleSummary, MIN_PLAYERS, MAX_PLAYERS, ROLE_CN } = require('./roles');
 const { shuffle } = require('./util');
 
@@ -127,12 +127,13 @@ class Room {
   start() {
     if (!this.canStart()) return false;
     this.status = 'picking';
-    // 每名玩家随机获得 5 个互不相同的候选武将（不同玩家之间可以重复出现，
-    // 但“已被选定”的武将不可再选，保证武将池足够容纳满员 10 人局）
-    for (const p of this.players) {
-      p.heroOptions = pickRandomHeroes(HERO_OPTION_COUNT).map((h) => h.id);
+    // 每名玩家 5 张候选卡，且全局互不重复：
+    // 这样任何玩家选定武将后，其他人的可选项数量都不会减少（武将池 52 > 10×5）
+    const groups = dealHeroOptions(this.players.length, HERO_OPTION_COUNT, shuffle);
+    this.players.forEach((p, i) => {
+      p.heroOptions = groups[i] || [];
       p.heroId = null;
-    }
+    });
     for (const p of this.players) if (p.isAI) this.autoPick(p);
     this.pickDeadline = Date.now() + PICK_SECONDS * 1000;
     this.broadcastRoom();
@@ -195,7 +196,8 @@ class Room {
     }));
     this.status = 'playing';
     const game = new Game(this);
-    game.aiDelay = 900;
+    // 可通过环境变量调小人机思考耗时，便于自动化联机测试跑满员 10 人局
+    game.aiDelay = process.env.SGS_AI_DELAY ? Number(process.env.SGS_AI_DELAY) : 900;
     this.game = game;
     game.init(entries);
     this.broadcastRoom();
