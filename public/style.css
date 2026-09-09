@@ -111,6 +111,35 @@ button,input{font-family:inherit}
 .seat-item.me{border-color:var(--gold);background:rgba(217,180,91,.12)}
 .seat-item.ai{background:rgba(154,107,255,.1)}
 .seat-item .si-top{display:flex;justify-content:space-between;align-items:center;gap:6px}
+/* 聊天气泡：挂在座位卡下沿，小尾巴朝上指向该角色，避免溢出面板被裁切 */
+.si-bubble{
+  position:relative;margin-top:8px;padding:6px 9px;border-radius:9px;
+  background:linear-gradient(180deg,#fdf8ea,#eee2c2);color:#2b2109;
+  font-size:12px;line-height:1.5;word-break:break-word;
+  box-shadow:0 3px 10px rgba(0,0,0,.32);animation:bubbleIn .22s ease-out;
+}
+.si-bubble::before{
+  content:"";position:absolute;left:15px;top:-6px;
+  border:6px solid transparent;border-top:0;border-bottom-color:#fdf8ea;
+}
+@keyframes bubbleIn{from{opacity:0;transform:translateY(-5px) scale(.96)}to{opacity:1;transform:none}}
+/* 聊天面板 */
+.chat-log{
+  height:132px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;
+  background:rgba(0,0,0,.26);border:1px solid var(--line);border-radius:9px;padding:8px;
+}
+.chat-log .cl-empty{color:var(--muted);font-size:12px;text-align:center;margin:auto}
+.chat-msg{font-size:12.5px;line-height:1.5;word-break:break-word}
+.chat-msg .cm-name{color:var(--gold);font-weight:700;margin-right:5px}
+.chat-msg.me .cm-name{color:#8ef0ae}
+.chat-msg .cm-text{color:#e6efe9}
+.chat-input-row{display:flex;gap:8px;margin-top:9px}
+.chat-input-row input{
+  flex:1 1 auto;min-width:0;padding:8px 10px;border-radius:8px;border:1px solid var(--line);
+  background:rgba(0,0,0,.32);color:var(--text);font-size:14px;outline:none;
+}
+.chat-input-row input:focus{border-color:var(--gold)}
+.chat-input-row .btn{flex:0 0 auto}
 .seat-item .si-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .seat-item .si-tag{font-size:11px;color:var(--muted)}
 .seat-item .si-hero{font-size:12px;color:var(--gold)}

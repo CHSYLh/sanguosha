@@ -114,6 +114,14 @@ io.on('connection', (socket) => {
     r.backToLobby();
   });
 
+  socket.on('room:chat', ({ text } = {}) => {
+    const r = room();
+    if (!r || !clientId) return;
+    const msg = r.addChat(clientId, text);
+    // 不合法/被限流的消息不广播，也不刷新房间状态
+    if (msg) r.broadcastChat(msg);
+  });
+
   socket.on('game:action', (payload) => {
     const r = room();
     if (!r || !r.game || !clientId) return;

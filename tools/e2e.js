@@ -12,6 +12,7 @@ const AIS = parseInt(process.env.AIS || '2', 10);
 // 默认预算随人数增加：人机每次决策都有固定思考耗时（默认 900ms），人数越多耗时越长。
 // 想让联机测试跑得快一些，可用 SGS_AI_DELAY=100 启动服务，或直接用 E2E_TIMEOUT 覆盖。
 const TIMEOUT = parseInt(process.env.E2E_TIMEOUT || String(120000 + (HUMANS + AIS) * 60000), 10);
+const CHAT_TEXT = '开黑吗';   // 联机聊天测试用的消息
 
 const errors = [];
 const clients = [];
@@ -19,6 +20,7 @@ let roomId = null;
 let finished = false;
 let started = false;
 let pushes = 0;
+let chatInRoomState = false;
 
 function check(cond, msg) {
   if (!cond) { errors.push(msg); console.error('  ✗ ' + msg); }
@@ -56,7 +58,7 @@ function checkNetAPI(done) {
 function makeClient(idx) {
   const clientId = `e2e_${idx}_` + Math.random().toString(36).slice(2, 8);
   const socket = io(URL, { transports: ['websocket'] });
-  const s = { idx, clientId, socket, picked: false, pushes: 0, fx: [], fxTypes: {}, fxBadSeq: 0 };
+  const s = { idx, clientId, socket, picked: false, pushes: 0, fx: [], fxTypes: {}, fxBadSeq: 0, chat: [] };
   clients.push(s);
 
   socket.on('connect', () => {
@@ -80,11 +82,14 @@ function makeClient(idx) {
   socket.on('room', (r) => {
     if (!roomId || r.id !== roomId) return;
     const want = HUMANS + AIS;
+    if (Array.isArray(r.chat) && r.chat.some((m) => m.text === CHAT_TEXT)) chatInRoomState = true;
     if (r.status === 'lobby' && r.playerCount === want && !started && idx === 0) {
       started = true;
       const s2 = r.roleSummary;
       check(s2.lord === 1, `${want} 人局身份自动配置：主公${s2.lord}/忠臣${s2.loyal}/反贼${s2.rebel}/内奸${s2.rene}`);
       check(s2.lord + s2.loyal + s2.rebel + s2.rene === want, '身份数量之和等于总人数');
+      // 开局前先发一条聊天，验证房间内所有人都能收到
+      socket.emit('room:chat', { text: CHAT_TEXT });
       socket.emit('room:start');
     }
     if (r.status === 'picking' && !s.picked) {
@@ -144,6 +149,11 @@ function makeClient(idx) {
     }
   });
 
+  // 房间聊天
+  socket.on('chat', (m) => {
+    if (m && typeof m === 'object') s.chat.push(m);
+  });
+
   // 特效 / 音效事件广播
   socket.on('fx', (f) => {
     if (!f || typeof f !== 'object') { errors.push('收到非法的 fx 事件'); return; }
@@ -173,6 +183,16 @@ function finish(g) {
   check(clients.every((c) => (c.fxTypes.turn || 0) > 0), '每个客户端都收到回合开始（turn）特效');
   check(clients.some((c) => (c.fxTypes.play || 0) > 0), `收到出牌（play）特效 × ${clients.reduce((n, c) => n + (c.fxTypes.play || 0), 0)}`);
   check(clients.every((c) => c.fxBadSeq === 0), 'fx 事件的 seq 严格递增（可排序 / 去重）');
+
+  // 房间聊天：同房间所有人都能收到
+  const gotChat = clients.filter((c) => c.chat.some((m) => m.text === CHAT_TEXT));
+  check(gotChat.length === clients.length,
+    `全部 ${clients.length} 个真人客户端都收到聊天消息「${CHAT_TEXT}」（实际 ${gotChat.length} 个）`);
+  const cm = clients.length ? clients[0].chat.find((m) => m.text === CHAT_TEXT) : null;
+  check(!!cm && cm.name === '玩家1', `聊天消息带发言者昵称（${cm && cm.name}）`);
+  check(!!cm && typeof cm.seat === 'number', '聊天消息带发言者座位号（用于挂在对应角色框上）');
+  check(!!cm && typeof cm.ts === 'number' && cm.ts > 0, '聊天消息带时间戳');
+  check(chatInRoomState, '房间状态里携带聊天记录（后加入的人也能看到历史消息）');
   const total = clients.reduce((n, c) => n + c.fx.length, 0);
   const kinds = [...new Set(clients.flatMap((c) => Object.keys(c.fxTypes)))].sort();
   console.log(`  特效事件共 ${total} 条，类型：${kinds.join('、')}`);

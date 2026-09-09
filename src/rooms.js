@@ -8,6 +8,11 @@ const { shuffle } = require('./util');
 
 const PICK_SECONDS = 30;
 const HERO_OPTION_COUNT = 5;  // 每位玩家的候选武将数量
+
+/* 聊天相关 */
+const CHAT_MAX_LEN = 60;      // 单条消息最大字数
+const CHAT_KEEP = 40;         // 房间内保留的最近消息条数
+const CHAT_MIN_INTERVAL = 600;// 同一玩家的发言最小间隔（毫秒）
 const AI_NAME_POOL = [
   '孟获', '祝融', '张角', '袁绍', '公孙瓒', '刘表', '陶谦', '孔融', '纪灵', '华雄',
   '颜良', '文丑', '高顺', '臧霸', '张绣', '马腾', '韩遂', '刘璋', '张鲁', '严白虎',
@@ -36,6 +41,38 @@ class Room {
     this.pickDeadline = 0;
     this.createdAt = Date.now();
     this.fxSeq = 0;           // 特效事件自增序号，客户端据此排序 / 去重
+    this.chat = [];           // 房间聊天记录 {id, seat, name, text, ts}
+    this.chatSeq = 0;
+    this.lastChatAt = {};     // clientId -> 上次发言时间，用于简单限流
+  }
+
+  /* ---------- 聊天 ---------- */
+  /**
+   * 收录一条聊天消息。
+   * 返回消息对象；内容为空、非本房成员或发言过快时返回 null。
+   */
+  addChat(clientId, text) {
+    const p = this.findByClient(clientId);
+    if (!p || p.isAI) return null;
+    const t = String(text == null ? '' : text).trim().replace(/\s+/g, ' ').slice(0, CHAT_MAX_LEN);
+    if (!t) return null;
+    // 简单限流：同一人 600ms 内只能发一条，避免刷屏
+    const now = Date.now();
+    if (now - (this.lastChatAt[clientId] || 0) < CHAT_MIN_INTERVAL) return null;
+    this.lastChatAt[clientId] = now;
+    const msg = { id: ++this.chatSeq, seat: p.seat, name: p.name, text: t, ts: now };
+    this.chat.push(msg);
+    if (this.chat.length > CHAT_KEEP) this.chat.shift();
+    return msg;
+  }
+
+  /** 广播一条聊天消息给房间内所有真人玩家 */
+  broadcastChat(msg) {
+    if (!msg) return;
+    for (const p of this.players) {
+      if (p.isAI) continue;
+      this.emitTo(p.clientId, 'chat', msg);
+    }
   }
 
   /* ---------- 基础 ---------- */
@@ -209,6 +246,7 @@ class Room {
     this.status = 'lobby';
     this.game = null;
     this.players.forEach((p) => { p.heroId = null; p.heroOptions = []; p.connected = true; });
+    this.chat = [];           // 回到大厅即清空上一局的聊天记录
     this.broadcastRoom();
   }
 
@@ -250,6 +288,7 @@ class Room {
       })),
       roleSummary: roleSummary(this.players.length >= MIN_PLAYERS ? this.players.length : MIN_PLAYERS),
       playerCount: this.players.length,
+      chat: this.chat.slice(-CHAT_KEEP),   // 新加入的玩家也能看到最近的聊天记录
     };
   }
 

@@ -29,7 +29,11 @@
     lastReqId: null,
     gx: { top: [] },    // 观星
     logOpen: false,
+    chatLog: [],        // 房间聊天记录（服务端为准）
+    chatBubbles: {},    // seat -> {text, at} 角色框旁的气泡
   };
+
+  const CHAT_BUBBLE_MS = 10000;   // 气泡显示时长
 
   /* ================= 工具 ================= */
   function genId() { return 'c' + Math.random().toString(36).slice(2, 10); }
@@ -88,6 +92,7 @@
   $('#btn-room-leave').addEventListener('click', () => {
     socket.emit('room:leave');
     state.room = null; state.game = null;
+    state.chatLog = []; state.chatBubbles = {};
     show('home');
   });
   $('#btn-ai-plus').addEventListener('click', () => socket.emit('room:setAICount', { count: aiCount() + 1 }));
@@ -99,6 +104,62 @@
     if (navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast('已复制邀请信息'), () => toast(text));
     else toast(text);
   });
+
+  /* ================= 房间聊天 ================= */
+  /** 收到一条消息：记入聊天记录；只有刚发出的消息才在对应角色框旁弹出气泡 */
+  function pushChat(msg) {
+    if (!msg || !msg.id) return;
+    if (state.chatLog.some((m) => m.id === msg.id)) return;
+    state.chatLog.push(msg);
+    if (state.chatLog.length > 40) state.chatLog.shift();
+
+    // 房间状态同步会带来历史消息，用时间戳区分，避免老消息反复弹气泡
+    if (Date.now() - (msg.ts || 0) >= CHAT_BUBBLE_MS) return;
+
+    const at = Date.now();
+    state.chatBubbles[msg.seat] = { text: msg.text, at };
+    setTimeout(() => {
+      const b = state.chatBubbles[msg.seat];
+      if (b && b.at === at) {
+        delete state.chatBubbles[msg.seat];
+        if (state.room) renderRoom();
+      }
+    }, CHAT_BUBBLE_MS);
+  }
+
+  function renderChat() {
+    const box = $('#chat-log');
+    if (!box) return;
+    const mine = state.room ? state.room.players.find((p) => p.clientId === state.clientId) : null;
+    if (!state.chatLog.length) {
+      box.innerHTML = '<div class="cl-empty">还没有人发言</div>';
+      return;
+    }
+    box.innerHTML = state.chatLog.map((m) => {
+      const isMe = mine && m.seat === mine.seat;
+      return `<div class="chat-msg ${isMe ? 'me' : ''}"><span class="cm-name">${esc(m.name)}</span><span class="cm-text">${esc(m.text)}</span></div>`;
+    }).join('');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function sendChat() {
+    const el = $('#chat-input');
+    if (!el) return;
+    const text = (el.value || '').trim();
+    if (!text) return;
+    el.value = '';
+    socket.emit('room:chat', { text });
+    window.SGS_Sound && window.SGS_Sound.play('click');
+  }
+
+  const chatInput = $('#chat-input');
+  if (chatInput) {
+    chatInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
+    });
+  }
+  const chatSend = $('#btn-chat-send');
+  if (chatSend) chatSend.addEventListener('click', sendChat);
 
   function aiCount() { return state.room ? state.room.players.filter((p) => p.isAI).length : 0; }
 
@@ -115,15 +176,21 @@
       ? (isHost ? `可开始（${r.minPlayers}~${r.maxPlayers} 人），也可继续添加人机` : '等待房主开始游戏…')
       : '';
 
-    $('#seat-list').innerHTML = r.players.map((p) => `
-      <div class="seat-item ${p.clientId === state.clientId ? 'me' : ''} ${p.isAI ? 'ai' : ''}">
+    $('#seat-list').innerHTML = r.players.map((p) => {
+      const bubble = state.chatBubbles[p.seat];
+      return `
+      <div class="seat-item ${p.clientId === state.clientId ? 'me' : ''} ${p.isAI ? 'ai' : ''}" data-seat="${p.seat}">
         <div class="si-top">
           <span class="si-name">${esc(p.name)}${p.isAI ? ' <span class="si-tag">(人机)</span>' : ''}</span>
           ${isHost && r.status === 'lobby' && p.isAI ? `<button class="btn btn-xs" data-kick="${p.seat}">移除</button>` : ''}
         </div>
         <div class="si-hero">${p.hero ? `${esc(p.hero.name)} · ${COUNTRY[p.hero.country]} · ${p.hero.hp}血` : '未选将'}</div>
         <div class="si-tag">${p.isAI ? '由电脑控制' : (p.connected ? '在线' : '掉线')} · 座位 ${p.seat + 1}</div>
-      </div>`).join('');
+        ${bubble ? `<div class="si-bubble">${esc(bubble.text)}</div>` : ''}
+      </div>`;
+    }).join('');
+
+    renderChat();
 
     const s = r.roleSummary || {};
     $('#role-preview').innerHTML = `<span class="muted">当前身份配置：</span>` +
@@ -1107,6 +1174,7 @@
   $('#btn-quit-game').addEventListener('click', () => {
     socket.emit('room:leave');
     state.room = null; state.game = null;
+    state.chatLog = []; state.chatBubbles = {};
     show('home');
   });
 
@@ -1139,8 +1207,19 @@
     if (state.room) socket.emit('room:join', { roomId: state.room.id, clientId: state.clientId, name: state.name }, () => {});
   });
 
+  socket.on('chat', (msg) => {
+    pushChat(msg);
+    if (state.room) renderRoom();
+    window.SGS_Sound && window.SGS_Sound.play('click');
+  });
+
   socket.on('room', (data) => {
     state.room = data;
+    // 服务端是聊天记录的权威来源（新加入的玩家也能拿到历史消息）
+    if (Array.isArray(data.chat)) {
+      state.chatLog = [];
+      data.chat.forEach((m) => pushChat(m));
+    }
     if (data.status === 'playing' && state.game) {
       renderRoom();
       return;

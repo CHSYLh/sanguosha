@@ -160,6 +160,22 @@ function fakeRoomPicking(clientId) {
   };
 }
 
+/** 大厅态房间（用于聊天测试），chat 为服务端下发的历史消息 */
+function fakeRoomLobby(clientId, chat = []) {
+  return {
+    id: 'TEST', status: 'lobby', hostClientId: clientId, pickDeadline: 0,
+    minPlayers: 2, maxPlayers: 10, roleConfig: {}, playerCount: 3,
+    roleSummary: { lord: 1, loyal: 1, rebel: 1, rene: 0 },
+    chat,
+    players: [
+      { seat: 0, name: '我', isAI: false, connected: true, clientId, heroId: null, hero: null, heroOptions: [], picked: false },
+      { seat: 1, name: '玩家B', isAI: false, connected: true, clientId: 'other1', heroId: null, hero: null, heroOptions: [], picked: false },
+      { seat: 2, name: '电脑A', isAI: true, connected: true, clientId: 'ai1', heroId: null, hero: null, heroOptions: [], picked: false },
+    ],
+    you: { clientId, seat: 0, isHost: true },
+  };
+}
+
 (async () => {
   const w = buildDom();
   const doc = w.document;
@@ -745,6 +761,86 @@ function fakeRoomPicking(clientId) {
   } else {
     check(false, '判定卡与出牌卡应同时存在以便校验垂直间距');
   }
+
+  /* ---------- [12] 房间聊天 ---------- */
+  console.log('\n[12] 房间聊天');
+  SGS.setRoom(fakeRoomLobby(SGS.state.clientId));
+  await new Promise((r) => setTimeout(r, 20));
+
+  check(!!$('#chat-input'), '房间内提供聊天输入框');
+  check(!!$('#btn-chat-send'), '房间内提供发送按钮');
+  check(!!$('#chat-log'), '房间内提供聊天记录区');
+  check($('#chat-log').textContent.includes('还没有人发言'), '无人发言时聊天记录区给出提示');
+
+  // 点击发送 → 发出 room:chat，并清空输入框
+  const chatEmits = [];
+  const origEmit = SGS.socket.emit;
+  SGS.socket.emit = function (...a) { chatEmits.push(a); return origEmit.apply(this, a); };
+  $('#chat-input').value = '大家好';
+  $('#btn-chat-send').click();
+  check(chatEmits.some((a) => a[0] === 'room:chat' && a[1] && a[1].text === '大家好'),
+    '点击发送会向服务端发出 room:chat');
+  check($('#chat-input').value === '', '发送后输入框被清空');
+
+  // 空白内容不发送
+  $('#chat-input').value = '   ';
+  $('#chat-input').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  check(chatEmits.length === 1, '空白内容不会被发送');
+
+  // Enter 键发送
+  $('#chat-input').value = '开冲';
+  $('#chat-input').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  check(chatEmits.some((a) => a[0] === 'room:chat' && a[1] && a[1].text === '开冲'), '回车键也能发送');
+  SGS.socket.emit = origEmit;
+
+  // 收到他人消息 → 气泡挂在该角色的框上
+  const chatHandler = SGS.socket.__h && SGS.socket.__h.chat;
+  check(typeof chatHandler === 'function', '客户端已注册 chat 事件处理');
+  chatHandler({ id: 1, seat: 1, name: '玩家B', text: '收到，开始吧', ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 30));
+  const bubbleOf = (seat) => $(`#seat-list .seat-item[data-seat="${seat}"] .si-bubble`);
+  check(!!bubbleOf(1), '发言者的角色框旁出现气泡');
+  check(bubbleOf(1) && bubbleOf(1).textContent === '收到，开始吧', '气泡内容就是该条消息');
+  check(!bubbleOf(0) && !bubbleOf(2), '其他角色的框上不会出现这条气泡');
+  check($('#chat-log').textContent.includes('玩家B'), '聊天记录显示发言者昵称');
+  check($('#chat-log').textContent.includes('收到，开始吧'), '聊天记录显示消息内容');
+
+  // 自己的消息要有区分样式
+  chatHandler({ id: 2, seat: 0, name: '我', text: '我说的', ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 30));
+  check(!!$('#chat-log .chat-msg.me'), '自己的消息在聊天记录里有区分样式');
+  check(!!bubbleOf(0), '自己的角色框旁同样会弹气泡');
+
+  // 转义：昵称与内容都不能被当成 HTML 执行
+  chatHandler({ id: 3, seat: 2, name: '<img src=x onerror=alert(1)>', text: '<script>alert(2)</script>', ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 30));
+  check(!$('#chat-log').querySelector('img') && !$('#chat-log').querySelector('script'),
+    '聊天昵称与内容经过转义，不会被当作 HTML 执行');
+  check(bubbleOf(2) && bubbleOf(2).textContent.includes('<script>'), '转义后内容仍按纯文本正常显示');
+
+  // 房间状态同步带来的历史消息：只进记录，不重复弹气泡
+  // 走真实的 room 推送通道（新玩家加入时服务端会带上历史消息）
+  const roomHandler = SGS.socket.__h && SGS.socket.__h.room;
+  const oldTs = Date.now() - 60000;
+  roomHandler(fakeRoomLobby(SGS.state.clientId, [
+    { id: 10, seat: 1, name: '玩家B', text: '这是很久以前的', ts: oldTs },
+  ]));
+  await new Promise((r) => setTimeout(r, 30));
+  check($('#chat-log').textContent.includes('这是很久以前的'), '历史消息会进入聊天记录');
+  check(!bubbleOf(1) || bubbleOf(1).textContent !== '这是很久以前的', '历史消息不会重新弹出气泡');
+
+  // 同一条消息重复下发不应产生重复记录
+  roomHandler(fakeRoomLobby(SGS.state.clientId, [
+    { id: 10, seat: 1, name: '玩家B', text: '这是很久以前的', ts: oldTs },
+  ]));
+  await new Promise((r) => setTimeout(r, 30));
+  const dup = Array.from(doc.querySelectorAll('#chat-log .chat-msg')).filter((el) => el.textContent.includes('这是很久以前的'));
+  check(dup.length === 1, `同一条消息不会重复出现（实际 ${dup.length} 条）`);
+
+  // 气泡样式：应有气泡外观（圆角 + 指向角色框的小尾巴）
+  const cssChat = fs.readFileSync(path.join(PUBLIC, 'style.css'), 'utf8');
+  check(/\.si-bubble\{[^}]*border-radius/.test(cssChat.replace(/\s*\n\s*/g, '')), '气泡有圆角样式');
+  check(/\.si-bubble::before\{/.test(cssChat), '气泡有指向角色框的小尾巴');
 
   report();
 

@@ -10,6 +10,7 @@ const fs = require('fs');
 const { Game } = require(path.join(__dirname, '..', 'src', 'engine'));
 const { HEROES } = require(path.join(__dirname, '..', 'src', 'heroes'));
 const { makeCard } = require(path.join(__dirname, '..', 'src', 'cards'));
+const { Room } = require(path.join(__dirname, '..', 'src', 'rooms'));
 
 const errors = [];
 function check(cond, msg) {
@@ -276,10 +277,64 @@ function testPortHandling() {
     'stop-server.ps1 为纯 ASCII 且无 BOM（Windows PowerShell 5.1 可正确解析）');
 }
 
+/* ---------- 4. 房间聊天 ---------- */
+async function testChat() {
+  console.log('\n[4] 房间聊天');
+  const r = new Room('CHAT');
+  r.join('c1', null, '张三');
+  r.addAI();
+  const p1 = r.players[0];
+  const ai = r.players[1];
+
+  check(r.addChat('c1', '大家好') !== null, '房间内成员可以发送消息');
+  check(r.addChat('c1', '   ') === null, '空白内容不会被收录');
+  check(r.addChat('c1', '') === null, '空内容不会被收录');
+  check(r.addChat('nobody', '我不在房间里') === null, '非本房成员不能发送');
+  check(r.addChat(ai.clientId, '人机发言') === null, '人机不会发言');
+
+  // 限流：同一人短时间内连发只收录第一条
+  const before = r.chat.length;
+  r.addChat('c1', '刷屏1');
+  const after = r.chat.length;
+  check(after === before, '同一人短时间内的连续发言被限流（防刷屏）');
+
+  // 长度截断
+  await new Promise((res) => setTimeout(res, 700));
+  const long = '很长的内容'.repeat(30);
+  const m = r.addChat('c1', long);
+  check(!!m && m.text.length === 60, `超长消息被截断到 60 字（实际 ${m && m.text.length}）`);
+
+  // 消息内容
+  const first = r.chat[0];
+  check(first && first.name === '张三', '消息带发言者昵称（张三）');
+  check(first && first.seat === p1.seat, `消息带发言者座位号（${first && first.seat}）`);
+  check(first && typeof first.ts === 'number' && first.ts > 0, '消息带时间戳（客户端据此判断是否为新消息）');
+  check(first && typeof first.id === 'number' && first.id > 0, '消息带自增 id（客户端据此去重）');
+
+  // 房间状态里携带聊天记录，后加入的人也能看到
+  const st = r.roomState();
+  check(Array.isArray(st.chat) && st.chat.some((x) => x.text === '大家好'), '房间状态里携带聊天记录');
+
+  // 回到大厅会清空上一局的聊天
+  r.backToLobby();
+  check(r.chat.length === 0, '回到大厅后清空聊天记录');
+
+  // 条数上限
+  const r2 = new Room('CHAT2');
+  r2.join('c9', null, '李四');
+  for (let i = 0; i < 60; i++) {
+    r2.lastChatAt.c9 = 0;   // 绕开限流，只验证条数上限
+    r2.addChat('c9', `第${i}条`);
+  }
+  check(r2.chat.length === 40, `聊天记录最多保留 40 条（实际 ${r2.chat.length}）`);
+  check(r2.chat[r2.chat.length - 1].text === '第59条', '保留的是最近的消息');
+}
+
 (async () => {
   testWinConditions();
   await testWineSelfRescue();
   await testRescuers();
+  await testChat();
   testPortHandling();
   console.log('\n—— 结果 ——');
   if (errors.length === 0) console.log('规则测试全部通过。');

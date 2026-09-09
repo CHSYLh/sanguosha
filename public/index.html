@@ -76,6 +76,18 @@
         <p><b>身份：</b>主公身份公开且体力上限+1，其余身份暗置，阵亡后亮明。身份数量随房间人数自动分配。</p>
       </div>
     </div>
+
+    <div class="panel chat-panel">
+      <div class="panel-head">
+        <h3>聊天</h3>
+        <span class="muted">房间内所有人可见</span>
+      </div>
+      <div id="chat-log" class="chat-log"></div>
+      <div class="chat-input-row">
+        <input id="chat-input" type="text" maxlength="60" placeholder="说点什么…（Enter 发送）" autocomplete="off">
+        <button id="btn-chat-send" class="btn btn-sm btn-gold">发送</button>
+      </div>
+    </div>
   </div>
 
   <footer class="bar bar-bottom">
