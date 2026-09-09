@@ -1,5 +1,21 @@
+# 依赖
 node_modules/
-package-lock.json
+
+# 运行日志与临时文件
+*.log
 server.log
 server.err
-*.log
+*.tmp
+*.bak
+*.swp
+*~
+
+# 锁文件（本项目不提交，若需要可复现安装请去掉下一行）
+package-lock.json
+
+# 编辑器 / 操作系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
