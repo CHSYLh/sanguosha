@@ -472,6 +472,25 @@ button,input{font-family:inherit}
 .card.equip{background:#e8eef2;border-color:#8fa6b5}
 .card.scroll{background:#f7ecd9;border-color:#c8a96a}
 
+/* 对局中的聊天：常驻但不抢操作区，只做增量更新，不影响出牌与倒计时 */
+.game-chat{flex:0 0 auto;display:flex;gap:6px;padding:5px 10px 6px;background:rgba(0,0,0,.3);border-top:1px solid var(--line)}
+.game-chat input{
+  flex:1 1 auto;min-width:0;padding:6px 9px;border-radius:7px;border:1px solid var(--line);
+  background:rgba(0,0,0,.32);color:var(--text);font-size:12.5px;outline:none;
+}
+.game-chat input:focus{border-color:var(--gold)}
+.game-chat .btn{flex:0 0 auto}
+/* 对局中挂在角色框下的气泡（与房间内同一套视觉） */
+.seat-bubble{
+  position:relative;margin-top:4px;padding:3px 6px;border-radius:7px;
+  background:linear-gradient(180deg,#fdf8ea,#eee2c2);color:#2b2109;
+  font-size:10.5px;line-height:1.4;word-break:break-word;
+  box-shadow:0 2px 7px rgba(0,0,0,.4);animation:bubbleIn .22s ease-out;
+}
+.seat-bubble::before{
+  content:"";position:absolute;left:11px;top:-5px;
+  border:5px solid transparent;border-top:0;border-bottom-color:#fdf8ea;
+}
 .prompt{flex:0 0 auto;min-height:0;padding:8px 10px;background:rgba(0,0,0,.36);border-top:1px solid var(--line)}
 .prompt:empty{display:none}
 .p-title{font-size:13px;color:var(--gold);margin-bottom:6px}

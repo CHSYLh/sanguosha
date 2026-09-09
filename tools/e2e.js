@@ -12,7 +12,8 @@ const AIS = parseInt(process.env.AIS || '2', 10);
 // 默认预算随人数增加：人机每次决策都有固定思考耗时（默认 900ms），人数越多耗时越长。
 // 想让联机测试跑得快一些，可用 SGS_AI_DELAY=100 启动服务，或直接用 E2E_TIMEOUT 覆盖。
 const TIMEOUT = parseInt(process.env.E2E_TIMEOUT || String(120000 + (HUMANS + AIS) * 60000), 10);
-const CHAT_TEXT = '开黑吗';   // 联机聊天测试用的消息
+const CHAT_TEXT = '开黑吗';     // 开局前聊天测试用的消息
+const CHAT_TEXT2 = '打得好';    // 对局进行中聊天测试用的消息
 
 const errors = [];
 const clients = [];
@@ -21,6 +22,7 @@ let finished = false;
 let started = false;
 let pushes = 0;
 let chatInRoomState = false;
+let inGameChatSent = false;
 
 function check(cond, msg) {
   if (!cond) { errors.push(msg); console.error('  ✗ ' + msg); }
@@ -105,6 +107,12 @@ function makeClient(idx) {
     if (!g.me) return;
     s.pushes++;
     pushes++;
+
+    // 对局进行中发一条聊天：延迟发送以避开限流，同时验证游戏照常推进
+    if (idx === 0 && !inGameChatSent) {
+      inGameChatSent = true;
+      setTimeout(() => socket.emit('room:chat', { text: CHAT_TEXT2 }), 900);
+    }
 
     // 信息隔离：对局中只能看到自己的身份、主公身份与已阵亡者身份
     if (!g.over) {
@@ -193,6 +201,11 @@ function finish(g) {
   check(!!cm && typeof cm.seat === 'number', '聊天消息带发言者座位号（用于挂在对应角色框上）');
   check(!!cm && typeof cm.ts === 'number' && cm.ts > 0, '聊天消息带时间戳');
   check(chatInRoomState, '房间状态里携带聊天记录（后加入的人也能看到历史消息）');
+
+  // 对局进行中聊天：同样全员可见，且不影响游戏结束
+  const gotChat2 = clients.filter((c) => c.chat.some((m) => m.text === CHAT_TEXT2));
+  check(gotChat2.length === clients.length,
+    `对局进行中发出的「${CHAT_TEXT2}」也被全部 ${clients.length} 个客户端收到（实际 ${gotChat2.length} 个）`);
   const total = clients.reduce((n, c) => n + c.fx.length, 0);
   const kinds = [...new Set(clients.flatMap((c) => Object.keys(c.fxTypes)))].sort();
   console.log(`  特效事件共 ${total} 条，类型：${kinds.join('、')}`);

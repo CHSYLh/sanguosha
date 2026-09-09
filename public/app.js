@@ -118,13 +118,7 @@
 
     const at = Date.now();
     state.chatBubbles[msg.seat] = { text: msg.text, at };
-    setTimeout(() => {
-      const b = state.chatBubbles[msg.seat];
-      if (b && b.at === at) {
-        delete state.chatBubbles[msg.seat];
-        if (state.room) renderRoom();
-      }
-    }, CHAT_BUBBLE_MS);
+    setTimeout(() => clearExpiredBubble(msg.seat, at), CHAT_BUBBLE_MS);
   }
 
   function renderChat() {
@@ -142,24 +136,59 @@
     box.scrollTop = box.scrollHeight;
   }
 
-  function sendChat() {
-    const el = $('#chat-input');
-    if (!el) return;
-    const text = (el.value || '').trim();
+  /** 只做增量更新：把气泡挂到对应座位上，不重绘整个牌桌，避免打断出牌与动画 */
+  function renderGameChat() {
+    const ring = $('#seat-ring');
+    if (!ring) return;
+    for (const el of Array.from(ring.querySelectorAll('.seat'))) {
+      const seat = Number(el.dataset.seat);
+      const b = state.chatBubbles[seat];
+      const box = el.querySelector('.seat-bubble');
+      if (b) {
+        if (box) box.textContent = b.text;
+        else {
+          const d = document.createElement('div');
+          d.className = 'seat-bubble';
+          d.textContent = b.text;
+          el.appendChild(d);
+        }
+      } else if (box) {
+        box.remove();
+      }
+    }
+  }
+
+  function sendChatFrom(input) {
+    if (!input) return;
+    const text = (input.value || '').trim();
     if (!text) return;
-    el.value = '';
+    input.value = '';
     socket.emit('room:chat', { text });
     window.SGS_Sound && window.SGS_Sound.play('click');
   }
 
-  const chatInput = $('#chat-input');
-  if (chatInput) {
-    chatInput.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') { e.preventDefault(); sendChat(); }
-    });
+  function sendChat() { sendChatFrom($('#chat-input')); }
+
+  /** 气泡到期后同步清掉房间与对局两处 */
+  function clearExpiredBubble(seat, at) {
+    const b = state.chatBubbles[seat];
+    if (!b || b.at !== at) return;
+    delete state.chatBubbles[seat];
+    if (state.room) renderRoom();
+    renderGameChat();
   }
-  const chatSend = $('#btn-chat-send');
-  if (chatSend) chatSend.addEventListener('click', sendChat);
+
+  // 房间页与对局页各有一个输入框，行为一致
+  for (const [sel, btnSel] of [['#chat-input', '#btn-chat-send'], ['#game-chat-input', '#btn-game-chat-send']]) {
+    const input = $(sel);
+    if (input) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') { e.preventDefault(); sendChatFrom(input); }
+      });
+    }
+    const btn = $(btnSel);
+    if (btn) btn.addEventListener('click', () => sendChatFrom($(sel)));
+  }
 
   function aiCount() { return state.room ? state.room.players.filter((p) => p.isAI).length : 0; }
 
@@ -320,6 +349,7 @@
       <div class="s-row">${equipMinis(pl.equip, true)}</div>
       ${pl.judge && pl.judge.length ? `<div class="s-row">${pl.judge.map((j) => `<span class="mini judge" data-info-card="${j.uid}" data-info-card-obj="1" title="${esc(j.desc)}">${esc(j.cn)}</span>`).join('')}</div>` : ''}
       ${pl.dead ? '<div class="s-row"><span class="mini">已阵亡</span></div>' : ''}
+      ${state.chatBubbles[pl.seat] ? `<div class="seat-bubble">${esc(state.chatBubbles[pl.seat].text)}</div>` : ''}
     </div>`;
   }
 
@@ -1210,6 +1240,8 @@
   socket.on('chat', (msg) => {
     pushChat(msg);
     if (state.room) renderRoom();
+    // 对局中同样显示（只增量更新气泡，不重绘牌桌，出牌与倒计时都不受影响）
+    renderGameChat();
     window.SGS_Sound && window.SGS_Sound.play('click');
   });
 
@@ -1255,6 +1287,9 @@
     showHeroInfo,
     setRoom(r) { state.room = r; renderRoom(); },
     setGame(g) { state.game = g; renderGame(); },
+    renderChat,
+    renderGameChat,
+    pushChat,
     seatPosition,
   };
 })();

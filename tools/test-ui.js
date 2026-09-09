@@ -842,6 +842,47 @@ function fakeRoomLobby(clientId, chat = []) {
   check(/\.si-bubble\{[^}]*border-radius/.test(cssChat.replace(/\s*\n\s*/g, '')), '气泡有圆角样式');
   check(/\.si-bubble::before\{/.test(cssChat), '气泡有指向角色框的小尾巴');
 
+  /* ---------- [13] 对局中聊天 ---------- */
+  console.log('\n[13] 对局中聊天');
+  SGS.state.chatBubbles = {};
+  SGS.setGame(fakeGame(6));
+  await new Promise((r) => setTimeout(r, 30));
+  const seatBubble = (seat) => $(`#seat-ring .seat[data-seat="${seat}"] .seat-bubble`);
+  check(!$('#seat-ring .seat-bubble'), '没有消息时角色框上不显示气泡');
+  check(!!$('#game-chat-input'), '对局界面也提供聊天输入框');
+  check(!!$('#btn-game-chat-send'), '对局界面也提供发送按钮');
+
+  // 发送
+  const emits2 = [];
+  const oe2 = SGS.socket.emit;
+  SGS.socket.emit = function (...a) { emits2.push(a); return oe2.apply(this, a); };
+  $('#game-chat-input').value = '打得好';
+  $('#btn-game-chat-send').click();
+  check(emits2.some((a) => a[0] === 'room:chat' && a[1] && a[1].text === '打得好'),
+    '对局中点击发送会向服务端发出 room:chat');
+  check($('#game-chat-input').value === '', '对局中发送后输入框被清空');
+  $('#game-chat-input').value = '回车发';
+  $('#game-chat-input').dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
+  check(emits2.some((a) => a[0] === 'room:chat' && a[1] && a[1].text === '回车发'), '对局中回车也能发送');
+  SGS.socket.emit = oe2;
+
+  // 收到消息：气泡挂到发言者座位上，且不能打扰正在进行的出牌
+  const handHtml = $('#self-area').innerHTML;
+  const promptHtml = $('#prompt').innerHTML;
+  chatHandler({ id: 20, seat: 2, name: '玩家3', text: '别打我', ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 30));
+  check(!!seatBubble(2), '对局中发言者的角色框上出现气泡');
+  check(seatBubble(2) && seatBubble(2).textContent === '别打我', '对局气泡内容就是该条消息');
+  check(!seatBubble(0) && !seatBubble(1) && !seatBubble(3), '其他角色的框上不显示该气泡');
+  check($('#self-area').innerHTML === handHtml, '聊天不会改变手牌/装备区（不打断出牌）');
+  check($('#prompt').innerHTML === promptHtml, '聊天不会改变操作区（不影响待操作与倒计时）');
+  check(!!$('#game-chat-input'), '聊天后输入框仍可用');
+
+  // 牌桌因状态推送重绘时，气泡应保留
+  SGS.renderGame();
+  await new Promise((r) => setTimeout(r, 30));
+  check(!!seatBubble(2), '牌桌重绘后气泡仍然保留');
+
   report();
 
   function report() {
