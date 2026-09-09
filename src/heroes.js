@@ -87,7 +87,7 @@ const SKILL_META = {
   huoji: { cn: '火计', type: 'passive', desc: '你可以将一张红色手牌当【火攻】使用。' },
   kanpo: { cn: '看破', type: 'passive', desc: '你可以将一张黑色手牌当【无懈可击】使用或打出。' },
   bazhen: { cn: '八阵', type: 'passive', desc: '锁定技，若你的装备区里没有防具牌，你视为装备着【八卦阵】。' },
-  juxiang: { cn: '巨象', type: 'passive', desc: '锁定技，【南蛮入侵】对你无效；当【南蛮入侵】结算结束后，你获得之。' },
+  juxiang: { cn: '巨象', type: 'passive', desc: '锁定技，【南蛮入侵】对你无效；其他角色使用的【南蛮入侵】结算结束后，你获得之（自己使用的不能再拿回，否则可无限重复）。' },
   lieren: { cn: '烈刃', type: 'trigger', desc: '当你使用【杀】造成伤害后，你可以与其拼点，若你赢，你获得其一张手牌。' },
   huoshou: { cn: '祸首', type: 'passive', desc: '锁定技，【南蛮入侵】对你无效。' },
   zaiqi: { cn: '再起', type: 'passive', desc: '摸牌阶段，若你已受伤，你可以放弃摸牌，改为回复1点体力。' },

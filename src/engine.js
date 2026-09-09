@@ -1335,8 +1335,11 @@ class Game {
           if (!res) await this.applyDamage({ source: p, target: t, amount: 1, card: main, reason: '南蛮入侵' });
         }
         // 【巨象】：【南蛮入侵】结算结束后，祝融获得之
-        // 必须用 inLimbo 判断：该牌可能已在结算中被【奸雄】夺得并随其阵亡进入弃牌堆
-        if (!this.over) {
+        // 两点限制都必须有：
+        // 1) 用 inLimbo 判断——该牌可能已在结算中被【奸雄】夺得并随其阵亡进入弃牌堆；
+        // 2) 使用者本人不能拿回——否则祝融能把手里的【南蛮入侵】反复打出又拿回，
+        //    同一回合内无限循环（实测一局能打出上万次，全场被磨死）。
+        if (!this.over && !this.hasSkill(p, 'juxiang')) {
           const zr = this.alive().find((x) => this.hasSkill(x, 'juxiang'));
           if (zr && this.inLimbo(main)) {
             zr.hand.push(main);

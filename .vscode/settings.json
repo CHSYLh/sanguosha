@@ -1,0 +1,7 @@
+{
+    "QoderCN.cloudModelAutoTriggerGenerateLength": "disable",
+    "QoderCN.cloudModelManualTriggerGenerateLength": "line",
+    "QoderCN.cloudModelAutoTriggerDisplayRule": false,
+    "QoderCN.aI Chat.mcpToolsInAgentMode": true,
+    "QoderCN.aI Chat.webToolsInAsk/AgentMode": "Auto-execute"
+}

@@ -203,7 +203,9 @@ async function testRescuers() {
     victim.hp = 0;
     await g.resolveDying(victim, killer);
     check(!victim.dead && victim.hp === 1, '击杀者交出桃后，被击倒者被救活');
-    check(killer.hand.length === 0, '救援消耗了那张桃');
+    // 用「那张桃已不在手上」判断，而不是手牌数为 0：
+    // 随机武将可能带【连营】等技能，用掉最后一张手牌后会再摸一张
+    check(!killer.hand.includes(peach), '救援消耗了那张桃');
   }
 
   // 其他角色同样会被询问

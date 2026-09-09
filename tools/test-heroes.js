@@ -192,11 +192,9 @@ async function testSkills() {
       let fired = false;
       const origDraw = g.drawCards.bind(g);
       g.drawCards = (who, n) => { if (who.seat === 0) fired = true; return origDraw(who, n); };
-      const before = p.hand.length;
       await g.playCard(p, { as, cardId: c.uid, targets });
       // 无中生有本身会摸 2 张，故用「是否触发过摸牌」判断
       if (!fired) bad.push(label);
-      void before;
     }
     check(bad.length === 0,
       `陆逊失去最后一张手牌时【连营】必定触发（基本/锦囊/装备/延时）${bad.length ? '，未触发：' + bad : ''}`);
@@ -362,34 +360,53 @@ async function testSkills() {
     check(!g.cardOptions(p, 'jink', {}).some((c) => c.id === 'bagua'), '【八阵】没有该技能时无防具不能判定');
   }
   {
-    // 巨象：免疫南蛮入侵并获得之
+    // 巨象：他人使用时免疫并获得之；自己使用时不能再拿回（否则可无限重复打出）
     const g = mk(['zhurong', 'caocao', 'guanyu']);
     const p = g.players[0];
     const inv = getCard(g, 'invasion');
     p.hand = [inv];
     const enemies = [g.players[1], g.players[2]];
     const hpBefore = enemies.map((x) => x.hp);
-    script(g, (seat, req) => null);   // 曹/关 不出杀
+    script(g, () => null);   // 曹/关 不出杀
     await g.playCard(p, { as: 'invasion', cardId: inv.uid, targets: [] });
-    check(enemies.every((x, i) => x.hp === hpBefore[i] - 1), '【巨象】不免疫他人的【南蛮入侵】伤害逻辑正常（祝融为使用者）');
-    check(p.hand.includes(inv), '【巨象】结算结束后获得该【南蛮入侵】');
+    check(enemies.every((x, i) => x.hp === hpBefore[i] - 1), '祝融自己使用【南蛮入侵】时，其他角色正常受到伤害');
+    check(!p.hand.includes(inv) && g.discardPile.includes(inv),
+      '祝融自己使用的【南蛮入侵】不会被【巨象】拿回（防止同回合无限重复）');
+
+    const g2 = mk(['zhurong', 'caocao', 'guanyu']);
+    const zr = g2.players[0];
+    const inv2 = getCard(g2, 'invasion');
+    g2.players[1].hand = [inv2];
+    const zrHp = zr.hp;
+    script(g2, () => null);
+    await g2.playCard(g2.players[1], { as: 'invasion', cardId: inv2.uid, targets: [] });
+    check(zr.hp === zrHp, '【巨象】免疫他人使用的【南蛮入侵】');
+    check(zr.hand.includes(inv2), '【巨象】他人使用的【南蛮入侵】结算后归祝融所有');
   }
   {
-    // 祸首：孟获免疫南蛮入侵
-    const g = mk(['menghuo', 'caocao']);
-    const p = g.players[0];
-    const before = p.hp;
-    script(g, (seat, req) => null);
-    await g.applyDamage({ source: g.players[1], target: p, amount: 1, card: null, reason: '南蛮入侵' });
-    void before;
-    check(true, '【祸首】免疫【南蛮入侵】（引擎在结算时跳过）');
-    const g2 = mk(['menghuo', 'caocao']);
-    const inv = getCard(g2, 'invasion');
-    g2.players[1].hand = [inv];
-    const hp0 = g2.players[0].hp;
-    script(g2, () => null);
-    await g2.playCard(g2.players[1], { as: 'invasion', cardId: inv.uid, targets: [] });
-    check(g2.players[0].hp === hp0, '【祸首】免疫【南蛮入侵】，祝融/孟获不掉血');
+    // 祸首：孟获免疫南蛮入侵（必须走真实的出牌结算，而不是直接调 applyDamage）
+    const g = mk(['menghuo', 'caocao', 'guanyu']);
+    const meng = g.players[0];
+    const guan = g.players[2];
+    const inv = getCard(g, 'invasion');
+    g.players[1].hand = [inv];
+    const mengHp = meng.hp;
+    const guanHp = guan.hp;
+    script(g, () => null);   // 曹/关 都不出杀
+    await g.playCard(g.players[1], { as: 'invasion', cardId: inv.uid, targets: [] });
+    check(meng.hp === mengHp, `【祸首】孟获不受【南蛮入侵】伤害（${mengHp} → ${meng.hp}）`);
+    check(guan.hp === guanHp - 1, '同一次【南蛮入侵】对没有免疫的角色正常造成伤害');
+  }
+  {
+    // 防循环回归：祝融在场时【南蛮入侵】不应被反复打出
+    let plays = 0;
+    for (let k = 0; k < 6; k++) {
+      const g = mk(['zhurong', 'menghuo', 'caocao', 'guanyu'], false);
+      const origLog = g.log.bind(g);
+      g.log = (t) => { if (String(t).includes('使用【南蛮入侵】')) plays++; origLog(t); };
+      await g.run();
+    }
+    check(plays <= 40, `6 局中【南蛮入侵】共打出 ${plays} 次（修复前会达到上万次）`);
   }
   {
     const g = mk(['zhurong', 'caocao']);
