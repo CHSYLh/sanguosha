@@ -402,6 +402,15 @@ function decideChoose(G, p, req) {
     case 'pindian':
       return { ids: [cards.slice().sort((a, b) => (b.card.num === 1 ? 14 : b.card.num) - (a.card.num === 1 ? 14 : a.card.num))[0].id] };
 
+    // 这些「可以」类触发技能几乎总是有利，人机一律发动
+    case 'lianying':
+    case 'jizhi':
+    case 'tiandu':
+    case 'xiaoji':
+    case 'biyue':
+    case 'keji':
+      return { ids: ['yes'] };
+
     case 'qiangxiMode': {
       const w = ch.find((c) => c.id === 'weapon');
       return { ids: [(w || ch[0]).id] };

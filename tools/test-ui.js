@@ -197,6 +197,30 @@ function fakeRoomPicking(clientId) {
   check(w.SGS_Sound.isMuted() === before, '静音开关可恢复');
   check(w.localStorage.getItem('sgs_muted') !== null, '静音状态已持久化到 localStorage');
 
+  // 2.5 音效按钮的可读性：曾用 btn-ghost + btn-gold 组合，
+  // btn-ghost 后声明会把金色背景清成透明，只剩深棕文字压在深色底上，几乎看不见。
+  const btnSound = $('#btn-sound');
+  check(!!btnSound, '游戏界面存在音效开关按钮');
+  if (btnSound) {
+    check(btnSound.classList.contains('btn-sound'), '音效按钮使用独立的 btn-sound 样式类');
+    check(!btnSound.classList.contains('btn-ghost'),
+      '音效按钮不再使用 btn-ghost（避免其覆盖 btn-gold 的背景导致文字看不清）');
+    const on = !w.SGS_Sound.isMuted();
+    check(btnSound.classList.contains(on ? 'on' : 'off'), `按钮配色与当前状态一致（${on ? 'on' : 'off'}）`);
+    check(btnSound.textContent.includes('音效') || btnSound.textContent.includes('静音'),
+      `按钮有可读文案（${btnSound.textContent.trim()}）`);
+    btnSound.click();
+    check(btnSound.classList.contains(on ? 'off' : 'on'), '点击后按钮配色随之切换');
+    check(btnSound.textContent.trim() !== '', '切换后按钮文案不为空');
+    btnSound.click();
+  }
+  const cssSound = fs.readFileSync(path.join(PUBLIC, 'style.css'), 'utf8');
+  check(/\.btn-sound\.on\{[^}]*color:#241a05/.test(cssSound.replace(/\s*\n\s*/g, '')),
+    '开启态为金色实心 + 深色文字（与背景对比明显）');
+  check(/\.btn-sound\.off\{[^}]*color:var\(--muted\)/.test(cssSound.replace(/\s*\n\s*/g, '')),
+    '静音态为浅色文字 + 深色底（与背景对比明显）');
+  check(/\.btn-ghost\.btn-gold\{/.test(cssSound), '补充 .btn-ghost.btn-gold 规则，金色背景不再被 ghost 覆盖');
+
   /* ---------- [3] 开始界面局域网地址 ---------- */
   console.log('\n[3] 开始界面（手机端适配）');
   // 需求变更：开始界面已移除局域网地址模块，改由一键启动程序与房间页「复制邀请」提供

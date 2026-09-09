@@ -38,6 +38,17 @@ button,input{font-family:inherit}
 .btn-sm{padding:7px 12px;font-size:13px}
 .btn-xs{padding:4px 9px;font-size:12px;border-radius:6px}
 .btn-ghost{background:transparent}
+/* .btn-ghost 在 .btn-gold 之后声明，同为单类选择器会覆盖掉金色背景，
+   导致「金色文字色 + 透明底」在深色背景上看不清。这里让金色始终生效。 */
+.btn-ghost.btn-gold{background:linear-gradient(180deg,var(--gold),var(--gold2))}
+/* 音效开关：开启=金色实心，静音=深色描边浅色字，两种状态都要清晰可读 */
+.btn-sound{color:var(--text);background:rgba(0,0,0,.35);border-color:var(--line)}
+.btn-sound.on{
+  background:linear-gradient(180deg,var(--gold),var(--gold2));
+  color:#241a05;border-color:var(--gold);font-weight:700;
+}
+.btn-sound.off{color:var(--muted);background:rgba(0,0,0,.35);border-color:var(--line)}
+.btn-sound.off:hover{background:rgba(255,255,255,.12);color:var(--text)}
 .muted{color:var(--muted);font-size:13px}
 .pill{background:rgba(0,0,0,.32);border:1px solid var(--line);border-radius:999px;padding:4px 11px;font-size:12px}
 .tip{margin-top:12px;color:var(--red);font-size:13px;min-height:18px;text-align:center}

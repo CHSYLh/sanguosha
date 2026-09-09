@@ -707,9 +707,18 @@ async function testSkills() {
     p.hp = 1;
     setHand(g, 0, ['slash', 'peach', 'jink']);
     p.turnFlags.slashUsed = 0;
-    script(g, () => null);
+    script(g, (seat, req) => (req.purpose === 'keji' ? { ids: ['yes'] } : null));
     await g.discardPhase(p);
-    check(p.hand.length === 3, '【克己】未使用过【杀】时跳过弃牌阶段');
+    check(p.hand.length === 3, '【克己】未使用过【杀】时可选择跳过弃牌阶段');
+    // 对照：选择不发动则正常弃牌
+    const g2 = mk(['lvmeng', 'caocao']);
+    const p2 = g2.players[0];
+    p2.hp = 1;
+    setHand(g2, 0, ['slash', 'peach', 'jink']);
+    p2.turnFlags.slashUsed = 0;
+    script(g2, (seat, req) => (req.purpose === 'keji' ? { ids: ['no'] } : null));
+    await g2.discardPhase(p2);
+    check(p2.hand.length === 1, '【克己】选择不发动时按体力上限正常弃牌');
   }
   {
     const g = mk(['luxun', 'caocao']);
@@ -723,9 +732,19 @@ async function testSkills() {
     const weapon = getCard(g, 'qinggang');
     p.equip.weapon = weapon;
     const before = p.hand.length;
-    script(g, () => null);
+    script(g, (seat, req) => (req.purpose === 'xiaoji' ? { ids: ['yes'] } : null));
     await g.loseEquip(p, 'weapon');
-    check(p.hand.length === before + 2, '【枭姬】失去装备区里的一张牌后摸两张牌');
+    check(p.hand.length === before + 2, '【枭姬】失去装备区里的一张牌后可选择摸两张牌');
+  }
+  {
+    // 【连营】是「可以摸一张牌」，玩家可以选择不发动
+    const g2 = mk(['luxun', 'caocao']);
+    const lx = g2.players[0];
+    const c = getCard(g2, 'slash');
+    lx.hand = [c];
+    script(g2, (seat, req) => (req.purpose === 'lianying' ? { ids: ['no'] } : null));
+    await g2.playCard(lx, { as: 'slash', cardId: c.uid, targets: [1] });
+    check(lx.hand.length === 0, '【连营】玩家选择不发动时不会摸牌');
   }
   {
     const g = mk(['sunshangxiang', 'guanyu']);

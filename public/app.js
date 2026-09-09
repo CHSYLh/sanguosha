@@ -1092,8 +1092,10 @@
   function refreshSoundBtn() {
     const muted = window.SGS_Sound ? window.SGS_Sound.isMuted() : false;
     const btn = $('#btn-sound');
-    btn.textContent = muted ? '🔇 已静音' : '🔊 音效';
-    btn.classList.toggle('btn-gold', !muted);
+    btn.textContent = muted ? '🔇 已静音' : '🔊 音效开';
+    // 用独立的 on/off 类控制配色，避免 btn-ghost 把金色背景覆盖掉导致文字看不清
+    btn.classList.toggle('on', !muted);
+    btn.classList.toggle('off', muted);
   }
   $('#btn-sound').addEventListener('click', () => {
     if (!window.SGS_Sound) return;

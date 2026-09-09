@@ -152,6 +152,10 @@ const SKILLS = {
 
   jizhi: {
     usedScroll: async (G, p) => {
+      if (G.over || p.dead) return;
+      const go = await G.askYesNo(p.seat, '是否发动【集智】摸一张牌？',
+        { yesLabel: '摸一张牌', noLabel: '不发动', purpose: 'jizhi' });
+      if (!go) return;
       G.drawCards(p, 1);
       G.log(`${p.name} 发动【集智】，摸一张牌`);
     },
@@ -164,7 +168,7 @@ const SKILLS = {
     damaged: async (G, p, { card, source }) => {
       // 无来源伤害（闪电等）不能发动；已进入弃牌堆或已被他人持有的牌不能再被获得
       if (!source || source.dead) return;
-      if (!card || G.discardPile.indexOf(card) >= 0 || G.inPossession(card)) return;
+      if (!G.inLimbo(card)) return;   // 已进入弃牌堆或已被他人持有的牌不能再获得
       const go = await G.askYesNo(p.seat, `是否发动【奸雄】获得造成此伤害的【${CARD_META[card.name].cn}】？`);
       if (!go) return;
       p.hand.push(card);
@@ -245,7 +249,11 @@ const SKILLS = {
   },
 
   tiandu: {
-    judgeDone: (G, p, { card }) => {
+    judgeDone: async (G, p, { card }) => {
+      if (!card || G.over || p.dead) return;
+      const go = await G.askYesNo(p.seat, `是否发动【天妒】获得判定牌 ${cardText(card)}？`,
+        { yesLabel: '获得此牌', noLabel: '不发动', purpose: 'tiandu' });
+      if (!go) return;
       p.hand.push(card);
       G.judgeCardTaken = true;
       G.log(`${p.name} 发动【天妒】，获得判定牌 ${cardText(card)}`);
@@ -396,10 +404,14 @@ const SKILLS = {
   keji: {},
 
   lianying: {
-    cardLose: async (G, p, { cards, fromEquip }) => {
+    cardLose: async (G, p, { fromEquip }) => {
       if (fromEquip) return;
-      if (p.dead) return;
+      if (p.dead || G.over) return;
       if (p.hand.length === 0) {
+        // 技能描述为「可以摸一张牌」，因此是否发动交由玩家自己决定
+        const go = await G.askYesNo(p.seat, '你失去了最后一张手牌，是否发动【连营】摸一张牌？',
+          { yesLabel: '摸一张牌', noLabel: '不发动', purpose: 'lianying' });
+        if (!go) return;
         G.drawCards(p, 1);
         G.log(`${p.name} 发动【连营】，摸一张牌`);
       }
@@ -408,7 +420,10 @@ const SKILLS = {
 
   xiaoji: {
     cardLose: async (G, p, { fromEquip }) => {
-      if (!fromEquip || p.dead) return;
+      if (!fromEquip || p.dead || G.over) return;
+      const go = await G.askYesNo(p.seat, '是否发动【枭姬】摸两张牌？',
+        { yesLabel: '摸两张牌', noLabel: '不发动', purpose: 'xiaoji' });
+      if (!go) return;
       G.drawCards(p, 2);
       G.log(`${p.name} 发动【枭姬】，摸两张牌`);
     },
@@ -465,6 +480,10 @@ const SKILLS = {
 
   biyue: {
     turnEnd: async (G, p) => {
+      if (G.over || p.dead) return;
+      const go = await G.askYesNo(p.seat, '是否发动【闭月】摸一张牌？',
+        { yesLabel: '摸一张牌', noLabel: '不发动', purpose: 'biyue' });
+      if (!go) return;
       G.drawCards(p, 1);
       G.log(`${p.name} 发动【闭月】，摸一张牌`);
     },

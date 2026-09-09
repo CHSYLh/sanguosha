@@ -285,6 +285,16 @@ class Game {
     return removed;
   }
 
+  /**
+   * 该牌是否仍处于「结算中」：既不在弃牌堆里，也不被任何角色持有。
+   * 用于「获得这张牌」类技能（【巨象】【奸雄】）：若这张牌在结算过程中
+   * 已被弃置（例如持有者阵亡），就不能再获得，否则同一张牌会同时身处两地。
+   */
+  inLimbo(card) {
+    if (!card) return false;
+    return !card.__inDiscard && !this.inPossession(card);
+  }
+
   /** 该牌是否仍被某位角色持有（手牌/装备/判定区）或在牌堆中 */
   inPossession(card) {
     if (!card) return false;
@@ -1064,12 +1074,17 @@ class Game {
 
   async discardPhase(p) {
     if (this.over || p.dead) return;
-    if (p.skillIds.includes('keji') && p.turnFlags.slashUsed === 0) {
-      this.log(`${p.name} 发动【克己】，跳过弃牌阶段`);
-      return;
-    }
     const excess = p.hand.length - p.hp;
     if (excess <= 0) return;
+    // 【克己】描述为「可以跳过弃牌阶段」，是否跳过由玩家决定（无需弃牌时就不询问）
+    if (p.skillIds.includes('keji') && p.turnFlags.slashUsed === 0) {
+      const go = await this.askYesNo(p.seat, '本回合未使用过【杀】，是否发动【克己】跳过弃牌阶段？',
+        { yesLabel: '跳过弃牌', noLabel: '正常弃牌', purpose: 'keji' });
+      if (go) {
+        this.log(`${p.name} 发动【克己】，跳过弃牌阶段`);
+        return;
+      }
+    }
     // 可以弃置任意张，只要最终手牌数不超过体力值：
     // 最少弃 excess 张（刚好留到体力值），最多可全部弃掉。
     const choices = p.hand.map((c) => ({ id: c.uid, label: cardText(c), card: cardView(c) }));
@@ -1320,9 +1335,10 @@ class Game {
           if (!res) await this.applyDamage({ source: p, target: t, amount: 1, card: main, reason: '南蛮入侵' });
         }
         // 【巨象】：【南蛮入侵】结算结束后，祝融获得之
+        // 必须用 inLimbo 判断：该牌可能已在结算中被【奸雄】夺得并随其阵亡进入弃牌堆
         if (!this.over) {
           const zr = this.alive().find((x) => this.hasSkill(x, 'juxiang'));
-          if (zr && !this.inPossession(main)) {
+          if (zr && this.inLimbo(main)) {
             zr.hand.push(main);
             this.log(`${zr.name} 发动【巨象】，获得【南蛮入侵】`);
           }
